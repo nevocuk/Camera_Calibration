@@ -1,39 +1,55 @@
-"""Kameralarin tam yeteneklerini kesfet: format, cozunurluk, gercek FPS."""
+"""Kameralarin tam yeteneklerini kesfet: format, cozunurluk, gercek FPS.
+
+Her cozunurluk+format icin:
+  1. Istenen formati ayarla
+  2. Gercekte dondurulen formati oku
+  3. Gercek FPS olc
+  4. Format donusumu olup olmadigini raporla
+"""
 import cv2
 import time
 
 RESOLUTIONS = [
     (640, 480), (800, 600), (1024, 768), (1280, 720),
-    (1280, 960), (1600, 1200), (1920, 1080), (2048, 1536), (3840, 2160),
+    (1280, 960), (1600, 1200), (1920, 1080), (2048, 1536),
+    (2560, 1440), (3840, 2160),
 ]
 FORMATS = [
     ("MJPG", cv2.VideoWriter_fourcc(*'MJPG')),
     ("YUY2", cv2.VideoWriter_fourcc(*'YUY2')),
-    ("NV12", cv2.VideoWriter_fourcc(*'NV12')),
-    ("H264", cv2.VideoWriter_fourcc(*'H264')),
 ]
+
+def fourcc_str(code):
+    return "".join([chr((code >> 8*j) & 0xFF) for j in range(4)])
 
 def measure_fps(cap, n_frames=30):
     for _ in range(5):
         cap.read()
     t0 = time.time()
-    ok_count = 0
+    ok = 0
     for _ in range(n_frames):
         ret, _ = cap.read()
         if ret:
-            ok_count += 1
+            ok += 1
     elapsed = time.time() - t0
-    if ok_count == 0:
-        return 0
-    return ok_count / elapsed
+    return ok / elapsed if ok > 0 else 0
 
-for cam_idx in [1, 2]:
-    print(f"\n{'='*60}")
-    print(f"  KAMERA {cam_idx} — Tam Yetenek Raporu")
-    print(f"{'='*60}")
+print("=" * 72)
+print("  KAMERA FORMAT VE COZUNURLUK TESTI")
+print("  Her satir: istenen → gercek alinan formati gosterir")
+print("=" * 72)
+
+for cam_idx in range(4):
+    cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        continue
+    cap.release()
+
+    print(f"\n--- KAMERA {cam_idx} ---")
+    print(f"  {'Istenen':>16s}  {'Alinan':>16s}  {'Format':>6s}  {'FPS':>6s}  {'Not':s}")
+    print(f"  {'-'*16}  {'-'*16}  {'-'*6}  {'-'*6}  {'-'*20}")
 
     for fmt_name, fmt_code in FORMATS:
-        results = []
         for w, h in RESOLUTIONS:
             cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
             if not cap.isOpened():
@@ -42,55 +58,50 @@ for cam_idx in [1, 2]:
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
 
-            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            actual_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-            actual_fmt = "".join([chr((actual_fourcc >> 8*j) & 0xFF) for j in range(4)])
+            aw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            ah = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            af = int(cap.get(cv2.CAP_PROP_FOURCC))
+            af_str = fourcc_str(af)
 
-            if actual_w == w and actual_h == h and actual_fmt == fmt_name:
-                fps = measure_fps(cap, 20)
-                results.append((w, h, fps))
+            ret, frame = cap.read()
+            if not ret:
+                cap.release()
+                continue
+
+            fps = measure_fps(cap, 20)
+
+            istenen = f"{fmt_name} {w}x{h}"
+            alinan = f"{af_str} {aw}x{ah}"
+            not_str = ""
+            if af_str != fmt_name:
+                not_str = f"FORMAT FARKLI! ({fmt_name}→{af_str})"
+            elif aw != w or ah != h:
+                not_str = f"cozunurluk degisti"
+            else:
+                not_str = "OK"
+
+            print(f"  {istenen:>16s}  {alinan:>16s}  {af_str:>6s}  {fps:>5.1f}  {not_str}")
             cap.release()
 
-        if results:
-            print(f"\n  Format: {fmt_name}")
-            print(f"  {'Cozunurluk':>12s}  {'Gercek FPS':>10s}  {'Megapiksel':>10s}")
-            print(f"  {'-'*12}  {'-'*10}  {'-'*10}")
-            for w, h, fps in results:
-                mp = w * h / 1_000_000
-                print(f"  {w:>5d}x{h:<5d}  {fps:>8.1f}    {mp:>8.2f}")
-
-    # Ek bilgiler
+    # Tek kamera, MJPG, 1280x960 — detayli bilgi
     cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
     if cap.isOpened():
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        props = {
-            "BRIGHTNESS": cv2.CAP_PROP_BRIGHTNESS,
-            "CONTRAST": cv2.CAP_PROP_CONTRAST,
-            "SATURATION": cv2.CAP_PROP_SATURATION,
-            "HUE": cv2.CAP_PROP_HUE,
-            "SHARPNESS": cv2.CAP_PROP_SHARPNESS,
-            "GAMMA": cv2.CAP_PROP_GAMMA,
-            "BACKLIGHT": cv2.CAP_PROP_BACKLIGHT,
-            "FOCUS": cv2.CAP_PROP_FOCUS,
-            "AUTOFOCUS": cv2.CAP_PROP_AUTOFOCUS,
-            "ZOOM": cv2.CAP_PROP_ZOOM,
-            "PAN": cv2.CAP_PROP_PAN,
-            "TILT": cv2.CAP_PROP_TILT,
-        }
-        print(f"\n  Ek Ozellikler:")
-        for name, prop in props.items():
-            val = cap.get(prop)
-            if val != 0 and val != -1:
-                print(f"    {name:16s}: {val}")
-            else:
-                # 0 olabilir ama var olabilir, set deneyelim
-                old = cap.get(prop)
-                ok = cap.set(prop, 1)
-                new = cap.get(prop)
-                cap.set(prop, old)
-                if ok and new != old:
-                    print(f"    {name:16s}: {old} (ayarlanabilir)")
-                else:
-                    print(f"    {name:16s}: desteklenmiyor")
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 960)
+        ret, frame = cap.read()
+        if ret:
+            print(f"\n  Detay (MJPG 1280x960):")
+            print(f"    Frame boyutu: {frame.shape}")
+            print(f"    dtype: {frame.dtype}")
+            bs = int(cap.get(cv2.CAP_PROP_BUFFERSIZE)) if hasattr(cv2, 'CAP_PROP_BUFFERSIZE') else -1
+            print(f"    Buffer size: {bs}")
+            backend = cap.getBackendName()
+            print(f"    Backend: {backend}")
         cap.release()
+
+print("\n" + "=" * 72)
+print("  SONUC: Eger YUY2 isteyip MJPG aliyorsaniz, kamera")
+print("  donanimi sadece MJPG destekliyor. Bu bir surucu siniri,")
+print("  yazilimla degistirilemez.")
+print("=" * 72)

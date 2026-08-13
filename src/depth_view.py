@@ -88,7 +88,7 @@ def main():
     )
 
     # Cozunurluk
-    fmt = "YUY2"
+    fmt = "MJPG"
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, encoding="utf-8") as f:
             cfg = json.load(f)
@@ -97,8 +97,8 @@ def main():
             w, h = cr
 
     # Kameralari ac
-    cap_l = cv2.VideoCapture(args.left, cv2.CAP_DSHOW)
-    cap_r = cv2.VideoCapture(args.right, cv2.CAP_DSHOW)
+    cap_l = cv2.VideoCapture(args.left, cv2.CAP_MSMF)
+    cap_r = cv2.VideoCapture(args.right, cv2.CAP_MSMF)
     for cap in [cap_l, cap_r]:
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fmt))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)

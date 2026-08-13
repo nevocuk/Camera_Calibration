@@ -269,10 +269,10 @@ def main():
     check_resolution(image_size)
     w, h = image_size
 
-    cap_l = cv2.VideoCapture(args.left, cv2.CAP_DSHOW)
-    cap_r = cv2.VideoCapture(args.right, cv2.CAP_DSHOW)
+    cap_l = cv2.VideoCapture(args.left, cv2.CAP_MSMF)
+    cap_r = cv2.VideoCapture(args.right, cv2.CAP_MSMF)
     for cap in [cap_l, cap_r]:
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'YUY2'))
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
 
