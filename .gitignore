@@ -45,3 +45,7 @@ staj_bilgilendirme_sunumu_*.pdf
 # Gecici dosyalar
 *.tmp
 *.bak
+
+# Conda / CUDA build (proje disinda ama yine de)
+opencv_build/
+miniconda*/
