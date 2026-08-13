@@ -1,0 +1,14 @@
+{
+  "board_type": "grid",
+  "squares_x": 15,
+  "squares_y": 10,
+  "square_length_mm": 26,
+  "marker_length_mm": 20,
+  "aruco_dict": "DICT_APRILTAG_36h11",
+  "olculen_kare_boyutu_mm": 26,
+  "calib_resolution": [
+    1280,
+    960
+  ],
+  "not": "calib.io 15x10 AprilTag grid board. Tag:20mm, Spacing:6mm, Dict:t36h11. Pitch=tag+spacing=26mm. Kumpasla 2 marker arasi merkez-merkez mesafeyi olc, olculen_kare_boyutu_mm olarak gir."
+}
