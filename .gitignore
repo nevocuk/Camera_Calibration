@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Claude Code
+.claude/
+
+# Kalibrasyon frame'leri (cok buyuk, repoya koymuyoruz)
+calibration/frames/
+calibration/frames_set_1/
+calibration/frames_set_2/
+calibration/frames_eski_4x4/
+calibration/debug_*.png
+
+# Depth capture ciktilari
+output/depth_captures/
+output/reports/
+output/box_templates/
+
+# Ekran goruntuleri ve sunumlar (repoya gerekmiyor)
+Ekran görüntüsü*
+preview.webp
+staj_bilgilendirme_sunumu_*.pdf
+
+# Gecici dosyalar
+*.tmp
+*.bak

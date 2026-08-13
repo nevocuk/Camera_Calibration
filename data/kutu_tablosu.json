@@ -1,0 +1,21 @@
+{
+  "kaynak": "Turkiye kargo firmalari (Yurtici, Aras, MNG) standart koli olculeri. Degerler firmalar arasi kucuk farklar gosterir; burada en yaygin olculer alinmistir. Rapora yazarken 'kargo firmalarinin yayinladigi standart koli olculeri baz alinmistir' ifadesi kullanilabilir.",
+  "birim": "cm",
+  "format": "[en, boy, yukseklik]",
+  "desi_formulu": "(en * boy * yukseklik) / 3000",
+  "kutular": [
+    {"no": 0, "ad": "Mini koli",      "olcu": [10, 10, 10], "desi": 0.33},
+    {"no": 1, "ad": "No.1 koli",      "olcu": [14, 10, 10], "desi": 0.47},
+    {"no": 2, "ad": "No.2 koli",      "olcu": [20, 15, 10], "desi": 1.00},
+    {"no": 3, "ad": "No.3 koli",      "olcu": [25, 15, 10], "desi": 1.25},
+    {"no": 4, "ad": "No.4 koli",      "olcu": [25, 20, 15], "desi": 2.50},
+    {"no": 5, "ad": "No.5 koli",      "olcu": [30, 20, 15], "desi": 3.00},
+    {"no": 6, "ad": "No.6 koli",      "olcu": [30, 25, 20], "desi": 5.00},
+    {"no": 7, "ad": "No.7 koli",      "olcu": [35, 25, 20], "desi": 5.83},
+    {"no": 8, "ad": "No.8 koli",      "olcu": [40, 30, 20], "desi": 8.00},
+    {"no": 9, "ad": "No.9 koli",      "olcu": [40, 30, 25], "desi": 10.00},
+    {"no": 10, "ad": "No.10 koli",    "olcu": [40, 30, 30], "desi": 12.00},
+    {"no": 11, "ad": "No.11 koli",    "olcu": [50, 40, 30], "desi": 20.00},
+    {"no": 12, "ad": "No.12 koli",    "olcu": [60, 40, 40], "desi": 32.00}
+  ]
+}
