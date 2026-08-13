@@ -5,7 +5,7 @@
   "square_length_mm": 26,
   "marker_length_mm": 20,
   "aruco_dict": "DICT_APRILTAG_36h11",
-  "olculen_kare_boyutu_mm": 26,
+  "olculen_kare_boyutu_mm": 26.0,
   "calib_resolution": [
     1280,
     960

@@ -135,7 +135,7 @@ def main():
     image_size = tuple(calib["image_size"])
     w, h = image_size
 
-    cap = cv2.VideoCapture(args.left, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(args.left, cv2.CAP_MSMF)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
 

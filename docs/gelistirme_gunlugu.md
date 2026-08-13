@@ -390,12 +390,80 @@ A4 boyutunda 3 sayfa rasgele doku deseni olusturuldu (`patterns/sgbm_doku_desenl
 
 ---
 
+## Asama 12: Gorsellestirme Secenekleri
+
+### Eklenenler
+- 6 colormap secenegi: JET, TURBO, MAGMA, INFERNO, BONE, HOT (RadioButton ile)
+- Derinlik kontur cizgileri (8 seviye, checkbox ile acilir)
+- Ham/WLS karsilastirma modu (sol yari=ham SGBM, sag yari=WLS+post, ortak normalizasyon)
+- Her colormap icin dinamik renk skalasi aciklamasi (hangi renk ne anlama geliyor)
+- Disparity modu ve karsilastirma modu icin ayri aciklamalar
+
+### Teknik detaylar
+- Contour: `cv2.inRange(dn, lv-3, lv+3)` ile 8 seviyede, beyaz cizgi olarak cizilir
+- Karsilastirma: ortak `common_max` ile normalize edilir, adil kiyaslama icin
+- Tum colormap referanslari dinamik (hardcoded COLORMAP_JET kaldirildi)
+
+---
+
+## Asama 13: Backend Degisikligi — DirectShow → Media Foundation
+
+### Sorun
+DirectShow (CAP_DSHOW) backend'i kameranin MJPG yeteneklerini dogru negotiate edemiyordu.
+Kamera donanimi aslinda MJPG destekliyor ama DirectShow YUY2'ye dusuyordu.
+YUY2 = sikistirilmamis → USB bant genisligi darboğazi → dusuk FPS.
+
+### Kesfedilis sureci
+1. **Ilk test (probe_full.py, DSHOW)**: 640x480=MJPG 20fps, 1280x960=YUY2 10fps, 1920x1080=YUY2 5fps
+2. **Yanlis sonuc**: "Kamera sadece 640x480'de MJPG destekliyor, firmware siniri" diye dusunuldu
+3. **Ipucu**: Hocanin ayni kamerayla Linux'ta 30fps almasi → V4L2 vs DirectShow farki olabilir mi?
+4. **MSMF testi (probe_backend.py)**: Ayni kameralar, CAP_MSMF backend → 1280x960'da **30fps**, 1920x1080'de **30fps**!
+5. **Tam test (probe_msmf_full.py)**: 2048x1536'ya kadar 30fps, sadece 4K'da 1fps
+
+### Sonuclar — DSHOW vs MSMF
+| Cozunurluk | DSHOW FPS | MSMF FPS | Artis |
+|---|---|---|---|
+| 640x480 | 16 | 30 | 2x |
+| 1280x960 | 10 | **30** | **3x** |
+| 1920x1080 | 5 | **30** | **6x** |
+| 2048x1536 | 1 | **30** | **30x** |
+| 3840x2160 | 1 | 1 | ayni |
+
+### Neden boyle oluyor?
+- **DirectShow** (2000'ler teknolojisi): kameranin modern format pazarligini iyi yapamaz, MJPG encode'u tetikleyemez → ham YUY2 gonderir
+- **Media Foundation** (modern Windows API): kamerayla dogru MJPG negotiate yapar → sikistirilmis veri USB'den gecer → yuksek FPS
+- **MJPG 1280x960**: ~200-300 KB/kare → 30fps'de ~9 MB/s (USB 2.0 rahat tasiyor)
+- **YUY2 1280x960**: ~2.4 MB/kare → 30fps'de ~72 MB/s (USB 2.0 siniri 60 MB/s, sigmiyor → 10fps'e duser)
+
+### Degisiklikler
+- `camera_test.py`: Tum `cv2.CAP_DSHOW` → `cv2.CAP_MSMF` (5 yer)
+- RESOLUTIONS listesi guncellendi:
+  - Eski: 640x480 MJPG ~20fps, 1280x960 YUY2 ~10fps, 1920x1080 YUY2 ~5fps, 3840x2160 YUY2 ~1fps
+  - Yeni: 640x480 ~30fps, 1280x960 ~30fps, 1920x1080 ~30fps, 2048x1536 ~30fps, 3840x2160 ~1fps
+- Tum formatlar MJPG olarak ayarlandi (MSMF ile dogru negotiate ediliyor)
+- 2048x1536 cozunurluk secenegi eklendi (MSMF sayesinde 30fps mumkun)
+
+### Etki
+- **Canli derinlik haritasi**: 1280x960'da 10fps → 30fps (3 kat akici)
+- **1080p kullanilabilir hale geldi**: 5fps → 30fps (artik pratik)
+- **2048x1536 yeni secenek**: onceden 1fps'di, simdi 30fps
+- **Stereo SGBM**: daha yuksek cozunurluk + ayni hiz = daha hassas olcum imkani
+
+### Onemli not
+Bu degisiklik kalibrasyonu etkilemez — kalibrasyon zaten statik karelerle calisir.
+Ama 1920x1080 veya 2048x1536 cozunurlukle yeni kalibrasyon yapmak daha hassas sonuc verebilir.
+
+---
+
 ## Dosya Degisiklikleri Ozeti
 
 | Dosya | Degisiklik |
 |-------|-----------|
 | data/charuco_config.json | board_type, olculen_kare_boyutu_mm, pitch=26mm |
-| src/camera_test.py | GridBoard + custom ID, WLS filtre, kare atlama, board paneli, kalibre et, ayar kayit, D kayit, post-processing toggle, 4K foto modu, _clean_disparity, _compute_disparity |
+| src/camera_test.py | GridBoard + custom ID, WLS filtre, kare atlama, board paneli, kalibre et, ayar kayit, D kayit, post-processing toggle, 4K foto modu, _clean_disparity, _compute_disparity, gorsellestirme secenekleri (6 colormap, kontur, karsilastirma), DSHOW→MSMF backend gecisi |
+| src/probe_backend.py | DSHOW vs MSMF backend karsilastirma test scripti |
+| src/probe_msmf_full.py | MSMF tam cozunurluk test scripti |
+| src/probe_full.py | Kamera format/cozunurluk/FPS tam test scripti |
 | src/calibration.py | Marker merkezleri, custom ID mapping, WLS, unicode fix, parlaklik/marker filtreleme, board turune gore RMS esigi |
 | src/ground_plane.py | GridBoard + custom ID + marker merkezleri |
 | patterns/sgbm_doku_desenleri.pdf | 3 sayfa A4 rasgele doku deseni |

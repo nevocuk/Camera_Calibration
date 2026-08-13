@@ -2,14 +2,14 @@
   "exposure": -4,
   "gain": 0,
   "wb": 4500,
-  "exp_offset_r": -1,
+  "exp_offset_r": 0,
   "gain_offset_r": 0.0,
-  "bright_offset_r": -8,
+  "bright_offset_r": 0,
   "brightness": 0,
   "contrast": 32,
   "saturation": 64,
   "sharpness": 3,
-  "resolution": "1280x960 YUY2 @6fps",
+  "resolution": "2048x1536 ~30fps",
   "left_idx": 1,
   "right_idx": 2
 }

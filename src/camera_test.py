@@ -34,11 +34,14 @@ SETTINGS_PATH = os.path.join(PROJECT_DIR, "data", "camera_settings.json")
 os.makedirs(FRAMES_DIR, exist_ok=True)
 
 RESOLUTIONS = [
-    ("640x480 MJPG @17fps", 640, 480, "MJPG"),
-    ("1280x720 YUY2 @6fps", 1280, 720, "YUY2"),
-    ("1280x960 YUY2 @6fps", 1280, 960, "YUY2"),
-    ("1920x1080 YUY2 @3fps", 1920, 1080, "YUY2"),
-    ("3840x2160 YUY2 @0.7fps", 3840, 2160, "YUY2"),
+    ("640x480 ~30fps", 640, 480, "MJPG"),
+    ("800x600 ~30fps", 800, 600, "MJPG"),
+    ("1024x768 ~30fps", 1024, 768, "MJPG"),
+    ("1280x720 ~30fps", 1280, 720, "MJPG"),
+    ("1280x960 ~30fps", 1280, 960, "MJPG"),
+    ("1920x1080 ~30fps", 1920, 1080, "MJPG"),
+    ("2048x1536 ~30fps", 2048, 1536, "MJPG"),
+    ("3840x2160 ~1fps (sadece 4K foto)", 3840, 2160, "MJPG"),
 ]
 
 # Renkler
@@ -220,7 +223,17 @@ class CameraApp:
                    background=[("selected", BORDER)],
                    foreground=[("selected", ACCENT)])
         style.configure("TCombobox", fieldbackground=INPUT_BG, background=CARD,
-                         foreground=FG)
+                         foreground=FG, selectbackground=BORDER,
+                         selectforeground=FG, arrowcolor=FG)
+        style.map("TCombobox",
+                   fieldbackground=[("readonly", INPUT_BG), ("focus", INPUT_BG)],
+                   foreground=[("readonly", FG), ("focus", FG)],
+                   selectbackground=[("readonly", BORDER)],
+                   selectforeground=[("readonly", FG)])
+        self.root.option_add("*TCombobox*Listbox.background", INPUT_BG)
+        self.root.option_add("*TCombobox*Listbox.foreground", FG)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", BORDER)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", ACCENT)
 
         self.notebook = ttk.Notebook(panel)
         self.notebook.pack(fill=tk.BOTH, expand=True)
@@ -272,7 +285,7 @@ class CameraApp:
 
         # Cozunurluk
         c = self._section(sf, "Cozunurluk / Format")
-        self.res_var = tk.StringVar(value=RESOLUTIONS[2][0])
+        self.res_var = tk.StringVar(value=RESOLUTIONS[6][0])
         combo_f = tk.Frame(c, bg=CARD)
         combo_f.pack(fill=tk.X, pady=4)
         self.res_combo = ttk.Combobox(combo_f, textvariable=self.res_var,
@@ -927,6 +940,43 @@ class CameraApp:
             font=("Segoe UI", 9))
         self.btn_clean_disp.pack(side=tk.LEFT)
 
+        c = self._section(tab, "Gorsellestirme")
+
+        cmap_row = tk.Frame(c, bg=CARD)
+        cmap_row.pack(fill=tk.X, pady=4)
+        tk.Label(cmap_row, text="Renk haritasi:", bg=CARD, fg=FG,
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self.colormap_var = tk.StringVar(value="JET")
+        self.colormap_names = ["JET", "TURBO", "MAGMA", "INFERNO", "BONE", "HOT"]
+        self.colormap_map = {
+            "JET": cv2.COLORMAP_JET,
+            "TURBO": cv2.COLORMAP_TURBO,
+            "MAGMA": cv2.COLORMAP_MAGMA,
+            "INFERNO": cv2.COLORMAP_INFERNO,
+            "BONE": cv2.COLORMAP_BONE,
+            "HOT": cv2.COLORMAP_HOT,
+        }
+        for name in self.colormap_names:
+            tk.Radiobutton(cmap_row, text=name, variable=self.colormap_var,
+                           value=name, bg=CARD, fg=FG, selectcolor=BORDER,
+                           activebackground=CARD, activeforeground=FG,
+                           font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=2)
+
+        viz_row = tk.Frame(c, bg=CARD)
+        viz_row.pack(fill=tk.X, pady=4)
+        self.contour_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(viz_row, text="Derinlik konturlari",
+                       variable=self.contour_var, bg=CARD, fg=FG,
+                       selectcolor=BORDER, activebackground=CARD,
+                       activeforeground=FG, font=("Segoe UI", 9)
+                       ).pack(side=tk.LEFT, padx=(0, 12))
+        self.compare_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(viz_row, text="Ham / WLS karsilastir",
+                       variable=self.compare_var, bg=CARD, fg=FG,
+                       selectcolor=BORDER, activebackground=CARD,
+                       activeforeground=FG, font=("Segoe UI", 9)
+                       ).pack(side=tk.LEFT)
+
         c = self._section(tab, "Bilgi")
         self.lbl_depth_status = self._info_row(c, "Durum")
         self.lbl_depth_center = self._info_row(c, "Merkez mesafe")
@@ -938,14 +988,12 @@ class CameraApp:
             fg=GREEN if has_calib else RED)
 
         c = self._section(tab, "Renk skalasi")
-        tk.Label(c, text=(
-            "KIRMIZI/SARI = yakin cisim\n"
-            "MAVI/MOR = uzak cisim\n"
-            "SIYAH = hesaplanamadi (dokusuz)\n\n"
-            "Goruntuye sol ust kosede bindirilir.\n"
-            "D tusu ile ekran goruntusu kaydeder."
-        ), bg=CARD, fg=MUTED, font=("Segoe UI", 9),
-                 justify="left").pack(fill=tk.X, pady=4)
+        self.lbl_cmap_desc = tk.Label(c, text="", bg=CARD, fg=MUTED,
+                                       font=("Segoe UI", 9), justify="left")
+        self.lbl_cmap_desc.pack(fill=tk.X, pady=4)
+        self.colormap_var.trace_add("write", lambda *_: self._update_cmap_desc())
+        self.compare_var.trace_add("write", lambda *_: self._update_cmap_desc())
+        self._update_cmap_desc()
 
         self.root.bind("<d>", lambda e: self._save_depth())
         self.root.bind("<D>", lambda e: self._save_depth())
@@ -1180,37 +1228,48 @@ class CameraApp:
 
     # ── Kamera ────────────────────────────────────────
     def _open_cameras(self):
-        self.cap_l = cv2.VideoCapture(self.left_idx, cv2.CAP_DSHOW)
-        self.cap_r = cv2.VideoCapture(self.right_idx, cv2.CAP_DSHOW)
+        self.status_bar.config(text="Kameralar baglaniyor (MSMF)...", fg=YELLOW)
+        self.root.update()
+        threading.Thread(target=self._open_cameras_bg, daemon=True).start()
 
-        cam_ok_l = self.cap_l is not None and self.cap_l.isOpened()
-        cam_ok_r = self.cap_r is not None and self.cap_r.isOpened()
+    def _open_cameras_bg(self):
+        cap_l = cv2.VideoCapture(self.left_idx, cv2.CAP_MSMF)
+        cap_r = cv2.VideoCapture(self.right_idx, cv2.CAP_MSMF)
+        self.cap_l = cap_l
+        self.cap_r = cap_r
+
+        cam_ok_l = cap_l is not None and cap_l.isOpened()
+        cam_ok_r = cap_r is not None and cap_r.isOpened()
+
         if not cam_ok_l and not cam_ok_r:
-            self.status_bar.config(text="HATA: Hicbir kamera bulunamadi!", fg=RED)
+            self.root.after(0, lambda: self.status_bar.config(
+                text="HATA: Hicbir kamera bulunamadi!", fg=RED))
             return
         if not cam_ok_l:
-            self.status_bar.config(text="UYARI: Sol kamera (idx {}) acilamadi!".format(
-                self.left_idx), fg=YELLOW)
+            self.root.after(0, lambda: self.status_bar.config(
+                text="UYARI: Sol kamera (idx {}) acilamadi!".format(self.left_idx), fg=YELLOW))
         if not cam_ok_r:
-            self.status_bar.config(text="UYARI: Sag kamera (idx {}) acilamadi!".format(
-                self.right_idx), fg=YELLOW)
+            self.root.after(0, lambda: self.status_bar.config(
+                text="UYARI: Sag kamera (idx {}) acilamadi!".format(self.right_idx), fg=YELLOW))
 
         sel = self.res_var.get()
-        w, h, fmt = 1280, 960, "YUY2"
+        w, h, fmt = 2048, 1536, "MJPG"
         for name, rw, rh, rfmt in RESOLUTIONS:
             if name == sel:
                 w, h, fmt = rw, rh, rfmt
                 break
-        for cap in [self.cap_l, self.cap_r]:
+        for cap in [cap_l, cap_r]:
             if cap and cap.isOpened():
                 cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fmt))
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
         self.current_w = w
         self.current_h = h
-        self._apply_loaded_settings()
-        self._apply_all()
+        self.root.after(0, self._apply_loaded_settings)
+        self.root.after(0, self._apply_all)
         self.running = True
+        self.root.after(0, lambda: self.status_bar.config(
+            text="Kameralar bagli — {} MSMF".format(sel), fg=ACCENT))
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
         self._update_display()
@@ -1275,6 +1334,16 @@ class CameraApp:
         sel = self.res_var.get()
         for name, w, h, fmt in RESOLUTIONS:
             if name == sel:
+                if w >= 3840:
+                    self.status_bar.config(
+                        text="4K canli kullanima uygun degil (~1fps). 4K Foto Modu butonunu kullanin.",
+                        fg=YELLOW)
+                    prev = f"{self.current_w}x{self.current_h}"
+                    for rn, rw, rh, rf in RESOLUTIONS:
+                        if rw == self.current_w and rh == self.current_h:
+                            self.res_var.set(rn)
+                            break
+                    return
                 self.running = False
                 time.sleep(0.15)
                 for cap in [self.cap_l, self.cap_r]:
@@ -1300,12 +1369,12 @@ class CameraApp:
         if side == "left":
             if self.cap_l is not None:
                 self.cap_l.release()
-            self.cap_l = cv2.VideoCapture(self.left_idx, cv2.CAP_DSHOW)
+            self.cap_l = cv2.VideoCapture(self.left_idx, cv2.CAP_MSMF)
             cap = self.cap_l
         else:
             if self.cap_r is not None:
                 self.cap_r.release()
-            self.cap_r = cv2.VideoCapture(self.right_idx, cv2.CAP_DSHOW)
+            self.cap_r = cv2.VideoCapture(self.right_idx, cv2.CAP_MSMF)
             cap = self.cap_r
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fmt))
@@ -1369,13 +1438,27 @@ class CameraApp:
 
             gray_l = cv2.cvtColor(fl, cv2.COLOR_BGR2GRAY)
             gray_r = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
-            sl = cv2.Laplacian(gray_l, cv2.CV_64F).var()
-            sr = cv2.Laplacian(gray_r, cv2.CV_64F).var()
-            bl = float(gray_l.mean())
-            br = float(gray_r.mean())
 
-            dl = fl.copy()
-            dr = fr.copy()
+            if not hasattr(self, '_metric_skip'):
+                self._metric_skip = 0
+            self._metric_skip += 1
+            if self._metric_skip % 10 == 0:
+                sl = cv2.Laplacian(gray_l, cv2.CV_64F).var()
+                sr = cv2.Laplacian(gray_r, cv2.CV_64F).var()
+                bl = float(gray_l.mean())
+                br = float(gray_r.mean())
+            else:
+                sl = getattr(self, 'score_l', 0)
+                sr = getattr(self, 'score_r', 0)
+                bl = getattr(self, 'bright_l', 0)
+                br = getattr(self, 'bright_r', 0)
+
+            if self.calib_mode:
+                dl = fl.copy()
+                dr = fr.copy()
+            else:
+                dl = fl
+                dr = fr
             cl = cr = 0
 
             if self.calib_mode:
@@ -1500,15 +1583,44 @@ class CameraApp:
                         dsp = self._compute_disparity(gl, gr)
                         dm = dsp.max() if dsp.max() > 0 else 1
                         dn = (dsp / dm * 255).astype(np.uint8)
-                        dc = cv2.applyColorMap(dn, cv2.COLORMAP_JET)
+                        cmap_id = self.colormap_map.get(
+                            self.colormap_var.get(), cv2.COLORMAP_JET)
+                        dc = cv2.applyColorMap(dn, cmap_id)
                         dc[dsp <= 0] = [0, 0, 0]
+                        if self.contour_var.get():
+                            levels = np.linspace(30, 230, 8).astype(np.uint8)
+                            for lv in levels:
+                                edges = cv2.inRange(dn, int(lv) - 3, int(lv) + 3)
+                                edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE,
+                                    np.ones((3, 3), np.uint8))
+                                dc[edges > 0] = [255, 255, 255]
                         msk = dsp > 0
                         fl = rl.copy()
                         fl[msk] = cv2.addWeighted(rl, 0.4, dc, 0.6, 0)[msk]
-                        # Sag tarafi grayscale disparity map olarak goster
-                        disp_gray = cv2.cvtColor(dn, cv2.COLOR_GRAY2BGR)
-                        disp_gray[dsp <= 0] = [0, 0, 0]
-                        fr = disp_gray
+                        if self.compare_var.get():
+                            dsp_raw = self.stereo.compute(gl, gr)
+                            dsp_raw = dsp_raw.astype(np.float32) / 16.0
+                            dsp_raw[dsp_raw <= 0] = 0
+                            common_max = max(dsp.max(), dsp_raw.max(), 1)
+                            dn_r = (dsp_raw / common_max * 255).astype(np.uint8)
+                            dn_c = (dsp / common_max * 255).astype(np.uint8)
+                            dc_raw = cv2.applyColorMap(dn_r, cmap_id)
+                            dc_wls = cv2.applyColorMap(dn_c, cmap_id)
+                            dc_raw[dsp_raw <= 0] = [0, 0, 0]
+                            dc_wls[dsp <= 0] = [0, 0, 0]
+                            h, w = dc_wls.shape[:2]
+                            mid = w // 2
+                            fr = dc_wls.copy()
+                            fr[:, :mid] = dc_raw[:, :mid]
+                            cv2.line(fr, (mid, 0), (mid, h), (255, 255, 255), 2)
+                            cv2.putText(fr, "Ham SGBM", (10, 25),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                            cv2.putText(fr, "WLS+Post", (mid + 10, 25),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                        else:
+                            disp_gray = cv2.cvtColor(dn, cv2.COLOR_GRAY2BGR)
+                            disp_gray[dsp <= 0] = [0, 0, 0]
+                            fr = disp_gray
                         # Merkez mesafe
                         cy, cx = rl.shape[0]//2, rl.shape[1]//2
                         # Nisan isareti (crosshair) — her iki goruntuye
@@ -1722,7 +1834,7 @@ class CameraApp:
         self.contrast_var.set(s.get("contrast", 32))
         self.saturation_var.set(s.get("saturation", 64))
         self.sharpness_var.set(s.get("sharpness", 3))
-        res = s.get("resolution", RESOLUTIONS[2][0])
+        res = s.get("resolution", RESOLUTIONS[6][0])
         self.res_var.set(res)
         self._pending_settings = None
 
@@ -1783,6 +1895,54 @@ class CameraApp:
         dsp[mask_closed == 0] = 0
         return dsp
 
+    def _update_cmap_desc(self):
+        descs = {
+            "JET": (
+                "KIRMIZI/SARI = yakin cisim\n"
+                "YESIL/CYAN = orta mesafe\n"
+                "MAVI/MOR = uzak cisim\n"
+                "SIYAH = hesaplanamadi (dokusuz)"),
+            "TURBO": (
+                "KIRMIZI = yakin cisim\n"
+                "SARI/YESIL = orta mesafe\n"
+                "MAVI/MOR = uzak cisim\n"
+                "SIYAH = hesaplanamadi (dokusuz)"),
+            "MAGMA": (
+                "SARI/BEYAZ = yakin cisim\n"
+                "PEMBE/MOR = orta mesafe\n"
+                "KOYU MOR/SIYAH = uzak cisim\n"
+                "SIYAH = hesaplanamadi (dokusuz)"),
+            "INFERNO": (
+                "SARI/BEYAZ = yakin cisim\n"
+                "TURUNCU/KIRMIZI = orta mesafe\n"
+                "MOR/SIYAH = uzak cisim\n"
+                "SIYAH = hesaplanamadi (dokusuz)"),
+            "BONE": (
+                "BEYAZ = yakin cisim\n"
+                "ACIK MAVI = orta mesafe\n"
+                "KOYU MAVI/SIYAH = uzak cisim\n"
+                "SIYAH = hesaplanamadi (dokusuz)"),
+            "HOT": (
+                "BEYAZ/SARI = yakin cisim\n"
+                "KIRMIZI/TURUNCU = orta mesafe\n"
+                "KOYU KIRMIZI/SIYAH = uzak cisim\n"
+                "SIYAH = hesaplanamadi (dokusuz)"),
+        }
+        name = self.colormap_var.get()
+        txt = descs.get(name, descs["JET"])
+        if self.compare_var.get():
+            txt += ("\n\n--- Sag panel: Karsilastirma modu ---\n"
+                    "Sol yari: Ham SGBM (filtresiz, gurultulu)\n"
+                    "Sag yari: WLS + Post-processing (temiz)\n"
+                    "Ayni renk skalasi, ayni normalizasyon")
+        else:
+            txt += ("\n\n--- Sag panel: Disparity haritasi ---\n"
+                    "BEYAZ = yuksek disparity (yakin)\n"
+                    "KOYU GRI = dusuk disparity (uzak)\n"
+                    "SIYAH = hesaplanamadi")
+        txt += "\n\nD tusu ile ekran goruntusu kaydeder."
+        self.lbl_cmap_desc.config(text=txt)
+
     def _toggle_depth(self):
         if not self.depth_mode:
             if self.calib_data is None:
@@ -1813,7 +1973,9 @@ class CameraApp:
         disp = self._compute_disparity(gray_l, gray_r)
         d_max = disp.max() if disp.max() > 0 else 1
         d_norm = (disp / d_max * 255).astype(np.uint8)
-        depth_color = cv2.applyColorMap(d_norm, cv2.COLORMAP_JET)
+        cmap_id = self.colormap_map.get(
+            self.colormap_var.get(), cv2.COLORMAP_JET)
+        depth_color = cv2.applyColorMap(d_norm, cmap_id)
         depth_color[disp <= 0] = [0, 0, 0]
         overlay = rect_l.copy()
         mask = disp > 0
@@ -1840,8 +2002,8 @@ class CameraApp:
 
         def do_4k():
             try:
-                cap_l = cv2.VideoCapture(self.left_idx, cv2.CAP_DSHOW)
-                cap_r = cv2.VideoCapture(self.right_idx, cv2.CAP_DSHOW)
+                cap_l = cv2.VideoCapture(self.left_idx, cv2.CAP_MSMF)
+                cap_r = cv2.VideoCapture(self.right_idx, cv2.CAP_MSMF)
                 fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
                 for cap in [cap_l, cap_r]:
                     cap.set(cv2.CAP_PROP_FOURCC, fourcc)
@@ -1914,7 +2076,9 @@ class CameraApp:
 
                 d_max = dsp.max() if dsp.max() > 0 else 1
                 d_norm = (dsp / d_max * 255).astype(np.uint8)
-                depth_color = cv2.applyColorMap(d_norm, cv2.COLORMAP_JET)
+                cmap_id = self.colormap_map.get(
+                    self.colormap_var.get(), cv2.COLORMAP_JET)
+                depth_color = cv2.applyColorMap(d_norm, cmap_id)
                 depth_color[dsp <= 0] = [0, 0, 0]
                 overlay = rect_l.copy()
                 mask = dsp > 0
