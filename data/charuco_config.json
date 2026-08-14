@@ -1,14 +1,14 @@
 {
-  "board_type": "grid",
-  "squares_x": 15,
-  "squares_y": 10,
-  "square_length_mm": 26,
-  "marker_length_mm": 20,
-  "aruco_dict": "DICT_APRILTAG_36h11",
-  "olculen_kare_boyutu_mm": 26.0,
+  "board_type": "charuco",
+  "squares_x": 9,
+  "squares_y": 13,
+  "square_length_mm": 15,
+  "marker_length_mm": 11,
+  "aruco_dict": "DICT_4X4_100",
+  "olculen_kare_boyutu_mm": 20.0,
   "calib_resolution": [
-    1280,
-    960
+    2048,
+    1536
   ],
-  "not": "calib.io 15x10 AprilTag grid board. Tag:20mm, Spacing:6mm, Dict:t36h11. Pitch=tag+spacing=26mm. Kumpasla 2 marker arasi merkez-merkez mesafeyi olc, olculen_kare_boyutu_mm olarak gir."
+  "not": "calib.io ChArUco 13x9. Orijinal: Checker=15mm, Marker=11mm, DICT_4X4, Legacy=ON. Basilmis hali olceklenmis: 20mm. Kod orani koruyarak olcekler (mk=11*20/15=14.67mm)."
 }

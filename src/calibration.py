@@ -72,21 +72,37 @@ def load_config():
         use_legacy = not cfg["aruco_dict"].startswith("DICT_APRILTAG")
         if use_legacy:
             board.setLegacyPattern(True)
-        detector = cv2.aruco.CharucoDetector(board)
+        params = cv2.aruco.DetectorParameters()
+        params.adaptiveThreshWinSizeMax = 73
+        params.adaptiveThreshWinSizeStep = 2
+        charuco_params = cv2.aruco.CharucoParameters()
+        detector = cv2.aruco.CharucoDetector(board, charuco_params,
+                                              params)
 
     return board, detector, cfg
 
 
 def detect_corners(gray, board, detector):
+    h, w = gray.shape[:2]
+    if w > 1280:
+        scale = 960.0 / h
+        small = cv2.resize(gray, (int(w * scale), 960))
+    else:
+        small = gray
+        scale = 1.0
     if isinstance(detector, cv2.aruco.ArucoDetector):
-        corners, ids, _ = detector.detectMarkers(gray)
+        corners, ids, _ = detector.detectMarkers(small)
         if ids is None or len(ids) < 4:
             return None, None
+        if scale != 1.0:
+            corners = tuple(c / scale for c in corners)
         return corners, ids
     else:
-        charuco_corners, charuco_ids, _, _ = detector.detectBoard(gray)
+        charuco_corners, charuco_ids, _, _ = detector.detectBoard(small)
         if charuco_corners is None or len(charuco_corners) < 6:
             return None, None
+        if scale != 1.0:
+            charuco_corners = charuco_corners / scale
         return charuco_corners, charuco_ids
 
 
@@ -295,7 +311,8 @@ def calibrate_stereo(board, corners_l, corners_r, ids_l, ids_r, image_size, cfg=
     print(f"  Baseline ||T|| = {baseline_mm:.1f} mm")
 
     is_grid = isinstance(board, cv2.aruco.GridBoard)
-    rms_limit = 1.0 if is_grid else 0.4
+    base_limit = 1.0 if is_grid else 0.4
+    rms_limit = base_limit * (image_size[0] / 960.0)
     if rms > rms_limit:
         print(f"\n  UYARI: RMS ({rms:.4f}) hedefin ({rms_limit}) ustunde!")
         print("  Olasi nedenler:")
@@ -420,7 +437,9 @@ def print_summary(result):
     print("=" * 50)
     with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg_tmp = json.load(f)
-    rms_limit = 1.0 if cfg_tmp.get("board_type") == "grid" else 0.4
+    base_limit = 1.0 if cfg_tmp.get("board_type") == "grid" else 0.4
+    img_w = result.get("image_size", (960,))[0]
+    rms_limit = base_limit * (img_w / 960.0)
     rms_ok = result["rms"] < rms_limit
     print(f"  Stereo RMS:  {result['rms']:.4f} px "
           f"{'BASARILI' if rms_ok else 'YETERSIZ'} (esik: {rms_limit})")

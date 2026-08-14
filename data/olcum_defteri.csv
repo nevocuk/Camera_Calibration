@@ -50,3 +50,9 @@ tarih,saat,asama,parametre,ayar,deger,birim,not
 2026-08-13,16:50,odak_testi,mesafe,800,381,laplacian_var,sol=330 sag=433
 2026-08-13,16:50,odak_testi,net_alan_sol,,200-600,mm,tepe=1223
 2026-08-13,16:50,odak_testi,net_alan_sag,,200-600,mm,tepe=902
+2026-08-14,14:54,kalibrasyon,RMS_stereo,,0.7323,px
+2026-08-14,14:54,kalibrasyon,RMS_sol,,0.5932,px
+2026-08-14,14:54,kalibrasyon,RMS_sag,,0.6054,px
+2026-08-14,14:54,kalibrasyon,baseline,,71.6,mm
+2026-08-14,14:54,kalibrasyon,fx_sol,,1292.0,px
+2026-08-14,14:54,kalibrasyon,fx_sag,,1292.5,px
