@@ -70,22 +70,44 @@ def main():
     map1x, map1y = cv2.initUndistortRectifyMap(K1, D1, R1, P1, image_size, cv2.CV_32FC1)
     map2x, map2y = cv2.initUndistortRectifyMap(K2, D2, R2, P2, image_size, cv2.CV_32FC1)
 
-    # SGBM stereo eslestirici
-    num_disp = 256
+    # Stereo eslestirici
+    num_disp = 384
     block_size = 5
-    stereo = cv2.StereoSGBM_create(
-        minDisparity=0,
-        numDisparities=num_disp,
-        blockSize=block_size,
-        P1=8 * 3 * block_size ** 2,
-        P2=32 * 3 * block_size ** 2,
-        disp12MaxDiff=1,
-        uniquenessRatio=10,
-        speckleWindowSize=100,
-        speckleRange=32,
-        preFilterCap=63,
-        mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
-    )
+    try:
+        use_gpu = cv2.cuda.getCudaEnabledDeviceCount() > 0
+    except Exception:
+        use_gpu = False
+
+    if use_gpu:
+        stereo = cv2.cuda.createStereoSGM(
+            minDisparity=0, numDisparities=num_disp, P1=10, P2=120,
+            uniquenessRatio=10, mode=0)
+        print("  GPU: CUDA StereoSGM aktif")
+    else:
+        stereo = cv2.StereoSGBM_create(
+            minDisparity=0,
+            numDisparities=num_disp,
+            blockSize=block_size,
+            P1=8 * 3 * block_size ** 2,
+            P2=32 * 3 * block_size ** 2,
+            disp12MaxDiff=1,
+            uniquenessRatio=10,
+            speckleWindowSize=100,
+            speckleRange=32,
+            preFilterCap=63,
+            mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+        )
+
+    # WLS filtre — gurultu temizleme
+    use_wls = True
+    try:
+        right_matcher = cv2.ximgproc.createRightMatcher(stereo)
+        wls_filter = cv2.ximgproc.createDisparityWLSFilter(stereo)
+        wls_filter.setLambda(8000)
+        wls_filter.setSigmaColor(1.5)
+    except AttributeError:
+        use_wls = False
+        print("  [!] cv2.ximgproc yok — WLS filtre devre disi")
 
     # Cozunurluk
     fmt = "MJPG"
@@ -118,14 +140,18 @@ def main():
     print("    3. Overlay    — gercek + derinlik ust uste")
     print()
     print("  S = ekran goruntusu kaydet")
+    print("  V = dogrulama — gercek mesafeyi gir, hatayi gor")
+    print("  R = dogrulama sonuclarini raporla")
     print("  ESC = cikis")
     print()
     print(f"  Cozunurluk: {w}x{h}")
-    print(f"  Baseline: {np.linalg.norm(calib['T']):.1f} mm")
+    print(f"  Baseline: {np.linalg.norm(calib['T'])* 1000:.1f} mm")
     print(f"  fx: {K1[0,0]:.0f} px")
     print()
 
     capture_count = 0
+    verify_log = []
+    last_center_z = None
 
     while True:
         # Senkron yakalama
@@ -143,7 +169,22 @@ def main():
         # 2. Disparity hesapla (gri tonlamada)
         gray_l = cv2.cvtColor(rect_l, cv2.COLOR_BGR2GRAY)
         gray_r = cv2.cvtColor(rect_r, cv2.COLOR_BGR2GRAY)
-        disparity = stereo.compute(gray_l, gray_r).astype(np.float32) / 16.0
+        if use_gpu:
+            gpu_l = cv2.cuda_GpuMat()
+            gpu_r = cv2.cuda_GpuMat()
+            gpu_l.upload(gray_l)
+            gpu_r.upload(gray_r)
+            gpu_disp = stereo.compute(gpu_l, gpu_r)
+            disparity = gpu_disp.download().astype(np.float32) / 16.0
+        else:
+            disp_left = stereo.compute(gray_l, gray_r)
+            if use_wls:
+                disp_right = right_matcher.compute(gray_r, gray_l)
+                disparity = wls_filter.filter(
+                    disp_left, gray_l, None, disp_right
+                ).astype(np.float32) / 16.0
+            else:
+                disparity = disp_left.astype(np.float32) / 16.0
 
         # 3. Normalizasyon (0-255 arasi)
         disp_valid = disparity.copy()
@@ -161,19 +202,26 @@ def main():
         overlay = rect_l.copy()
         overlay[mask] = cv2.addWeighted(rect_l, 0.4, depth_color, 0.6, 0)[mask]
 
-        # 6. Derinlik bilgisi (merkez pikseldeki mesafe)
+        # 6. Derinlik bilgisi (merkez bolge medyani — 21x21 piksel)
         cy, cx = h // 2, w // 2
-        center_disp = disparity[cy, cx]
-        if center_disp > 0:
-            # Z = f * B / d  (Q matrisinden)
-            pts = cv2.reprojectImageTo3D(disparity, Q)
-            center_z = abs(pts[cy, cx, 2]) * 1000
-            if 0 < center_z < 5000:
+        r = 10
+        roi_disp = disparity[cy - r:cy + r + 1, cx - r:cx + r + 1]
+        valid = roi_disp[roi_disp > 0]
+        if len(valid) > 5:
+            med_disp = np.median(valid)
+            # Z = f * B / d  (f=P1[0,0], B=|T|, d=disparity)
+            focal = P1[0, 0]
+            baseline_m = np.linalg.norm(calib["T"])
+            center_z = (focal * baseline_m / med_disp) * 1000
+            if 0 < center_z < 10000:
                 info = f"Merkez: {center_z:.0f} mm"
+                last_center_z = center_z
             else:
                 info = "Merkez: ---"
+                last_center_z = None
         else:
             info = "Merkez: ---"
+            last_center_z = None
 
         # Gosterim icin kucult
         scale = min(640 / w, 480 / h)
@@ -223,9 +271,40 @@ def main():
             cv2.imwrite(f"{prefix}_sol.png", rect_l)
             cv2.imwrite(f"{prefix}_derinlik.png", depth_color)
             cv2.imwrite(f"{prefix}_overlay.png", overlay)
-            # Tam cozunurluk disparity
             cv2.imwrite(f"{prefix}_disparity_raw.png", disp_norm)
             print(f"  Kaydedildi: {prefix}_*.png")
+        elif key == ord('v'):
+            if last_center_z is None:
+                print("  [!] Merkez mesafe hesaplanamadi — cismi ortala")
+            else:
+                try:
+                    gercek = input(f"  Gercek mesafe (mm)? [olculen: {last_center_z:.0f}] > ")
+                    gercek = float(gercek.strip())
+                    hata_mm = last_center_z - gercek
+                    hata_pct = (hata_mm / gercek) * 100
+                    print(f"  Olculen: {last_center_z:.0f} mm | "
+                          f"Gercek: {gercek:.0f} mm | "
+                          f"Hata: {hata_mm:+.1f} mm ({hata_pct:+.1f}%)")
+                    verify_log.append({
+                        "gercek_mm": gercek,
+                        "olculen_mm": last_center_z,
+                        "hata_mm": hata_mm,
+                        "hata_pct": hata_pct,
+                    })
+                except (ValueError, EOFError):
+                    print("  [!] Gecersiz giris")
+        elif key == ord('r'):
+            if not verify_log:
+                print("  Henuz dogrulama yapilmadi — V ile test et")
+            else:
+                print(f"\n  {'Gercek':>8} {'Olculen':>8} {'Hata':>8} {'%':>6}")
+                print(f"  {'-'*8} {'-'*8} {'-'*8} {'-'*6}")
+                for v in verify_log:
+                    print(f"  {v['gercek_mm']:>8.0f} {v['olculen_mm']:>8.0f} "
+                          f"{v['hata_mm']:>+8.1f} {v['hata_pct']:>+6.1f}")
+                hata_list = [abs(v['hata_pct']) for v in verify_log]
+                print(f"\n  Ort. mutlak hata: {np.mean(hata_list):.1f}%")
+                print(f"  Maks. mutlak hata: {np.max(hata_list):.1f}%")
 
     cap_l.release()
     cap_r.release()

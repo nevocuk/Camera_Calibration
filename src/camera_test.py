@@ -91,7 +91,12 @@ def load_charuco():
         use_legacy = not cfg["aruco_dict"].startswith("DICT_APRILTAG")
         if use_legacy:
             board.setLegacyPattern(True)
-        detector = cv2.aruco.CharucoDetector(board)
+        params = cv2.aruco.DetectorParameters()
+        params.adaptiveThreshWinSizeMax = 73
+        params.adaptiveThreshWinSizeStep = 2
+        charuco_params = cv2.aruco.CharucoParameters()
+        detector = cv2.aruco.CharucoDetector(board, charuco_params,
+                                              params)
         max_corners = (cfg["squares_x"] - 1) * (cfg["squares_y"] - 1)
 
     return board, detector, max_corners, cfg
@@ -179,6 +184,12 @@ class CameraApp:
         self.bright_r = 0.0
         self.peak_l = 0.0
         self.peak_r = 0.0
+
+        # GPU destegi
+        try:
+            self._use_gpu = cv2.cuda.getCudaEnabledDeviceCount() > 0
+        except Exception:
+            self._use_gpu = False
 
         # Derinlik/olcum state
         self.depth_mode = False
@@ -756,7 +767,7 @@ class CameraApp:
             try:
                 v = float(val)
                 design = self.charuco_cfg["square_length_mm"]
-                if abs(v - design) <= design * 0.15:
+                if abs(v - design) <= design * 0.5:
                     status = f"{v} mm OK" + (" KILITLI" if self.sq_locked else "")
                     self.sq_status.config(text=status, fg=GREEN)
                 else:
@@ -1233,8 +1244,14 @@ class CameraApp:
         threading.Thread(target=self._open_cameras_bg, daemon=True).start()
 
     def _open_cameras_bg(self):
-        cap_l = cv2.VideoCapture(self.left_idx, cv2.CAP_MSMF)
-        cap_r = cv2.VideoCapture(self.right_idx, cv2.CAP_MSMF)
+        results = [None, None]
+        def _open(idx, slot):
+            results[slot] = cv2.VideoCapture(idx, cv2.CAP_MSMF)
+        t_l = threading.Thread(target=_open, args=(self.left_idx, 0))
+        t_r = threading.Thread(target=_open, args=(self.right_idx, 1))
+        t_l.start(); t_r.start()
+        t_l.join(); t_r.join()
+        cap_l, cap_r = results
         self.cap_l = cap_l
         self.cap_r = cap_r
 
@@ -1345,17 +1362,20 @@ class CameraApp:
                             break
                     return
                 self.running = False
-                time.sleep(0.15)
+                if self.thread is not None:
+                    self.thread.join(timeout=2.0)
                 for cap in [self.cap_l, self.cap_r]:
-                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fmt))
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                    if cap and cap.isOpened():
+                        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fmt))
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
                 self.current_w = w
                 self.current_h = h
                 self._apply_all()
                 self.running = True
                 self.thread = threading.Thread(target=self._capture_loop, daemon=True)
                 self.thread.start()
+                self._update_display()
                 break
 
     # ── Capture ───────────────────────────────────────
@@ -1436,22 +1456,24 @@ class CameraApp:
                 time.sleep(0.2)
                 continue
 
-            gray_l = cv2.cvtColor(fl, cv2.COLOR_BGR2GRAY)
-            gray_r = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
-
             if not hasattr(self, '_metric_skip'):
                 self._metric_skip = 0
             self._metric_skip += 1
-            if self._metric_skip % 10 == 0:
-                sl = cv2.Laplacian(gray_l, cv2.CV_64F).var()
-                sr = cv2.Laplacian(gray_r, cv2.CV_64F).var()
-                bl = float(gray_l.mean())
-                br = float(gray_r.mean())
+            skip_n = 10 if self.current_w >= 2048 else 3
+            if self._metric_skip % skip_n == 0:
+                small_l = cv2.cvtColor(cv2.resize(fl, (640, 480)), cv2.COLOR_BGR2GRAY)
+                small_r = cv2.cvtColor(cv2.resize(fr, (640, 480)), cv2.COLOR_BGR2GRAY)
+                sl = cv2.Laplacian(small_l, cv2.CV_64F).var()
+                sr = cv2.Laplacian(small_r, cv2.CV_64F).var()
+                bl = float(small_l.mean())
+                br = float(small_r.mean())
             else:
                 sl = getattr(self, 'score_l', 0)
                 sr = getattr(self, 'score_r', 0)
                 bl = getattr(self, 'bright_l', 0)
                 br = getattr(self, 'bright_r', 0)
+
+            cl = cr = 0
 
             if self.calib_mode:
                 dl = fl.copy()
@@ -1459,7 +1481,6 @@ class CameraApp:
             else:
                 dl = fl
                 dr = fr
-            cl = cr = 0
 
             if self.calib_mode:
                 if not hasattr(self, '_detect_skip'):
@@ -1467,16 +1488,30 @@ class CameraApp:
                     self._last_detect_l = (None, None)
                     self._last_detect_r = (None, None)
                 self._detect_skip += 1
-                run_detect = (self._detect_skip % 3 == 0)
+                run_detect = (self._detect_skip % 5 == 0)
                 is_grid = isinstance(self.detector, cv2.aruco.ArucoDetector)
 
                 if run_detect:
+                    if self.current_w > 1280:
+                        det_scale = 960.0 / fl.shape[0]
+                        det_w = int(fl.shape[1] * det_scale)
+                        det_l = cv2.cvtColor(cv2.resize(fl, (det_w, 960)), cv2.COLOR_BGR2GRAY)
+                        det_r = cv2.cvtColor(cv2.resize(fr, (det_w, 960)), cv2.COLOR_BGR2GRAY)
+                        inv_scale = 1.0 / det_scale
+                    else:
+                        det_l = cv2.cvtColor(fl, cv2.COLOR_BGR2GRAY)
+                        det_r = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
+                        inv_scale = 1.0
                     try:
                         if is_grid:
-                            corners_l, ids_l, _ = self.detector.detectMarkers(gray_l)
+                            corners_l, ids_l, _ = self.detector.detectMarkers(det_l)
+                            if corners_l and inv_scale != 1.0:
+                                corners_l = tuple(c * inv_scale for c in corners_l)
                             self._last_detect_l = (corners_l, ids_l)
                         else:
-                            ch_corners_l, ch_ids_l, _, _ = self.detector.detectBoard(gray_l)
+                            ch_corners_l, ch_ids_l, _, _ = self.detector.detectBoard(det_l)
+                            if ch_corners_l is not None and inv_scale != 1.0:
+                                ch_corners_l = ch_corners_l * inv_scale
                             self._last_detect_l = (ch_corners_l, ch_ids_l)
                     except Exception as e:
                         if not hasattr(self, '_dbg_err'):
@@ -1484,10 +1519,14 @@ class CameraApp:
                             print(f"[DEBUG] SOL HATA: {e}")
                     try:
                         if is_grid:
-                            corners_r, ids_r, _ = self.detector.detectMarkers(gray_r)
+                            corners_r, ids_r, _ = self.detector.detectMarkers(det_r)
+                            if corners_r and inv_scale != 1.0:
+                                corners_r = tuple(c * inv_scale for c in corners_r)
                             self._last_detect_r = (corners_r, ids_r)
                         else:
-                            ch_corners_r, ch_ids_r, _, _ = self.detector.detectBoard(gray_r)
+                            ch_corners_r, ch_ids_r, _, _ = self.detector.detectBoard(det_r)
+                            if ch_corners_r is not None and inv_scale != 1.0:
+                                ch_corners_r = ch_corners_r * inv_scale
                             self._last_detect_r = (ch_corners_r, ch_ids_r)
                     except Exception as e:
                         if not hasattr(self, '_dbg_err_r'):
@@ -1576,10 +1615,21 @@ class CameraApp:
                         raw_l = self.frame_l
                         raw_r = self.frame_r
                     if raw_l is not None and raw_r is not None:
-                        rl = cv2.remap(raw_l, self.map1x, self.map1y, cv2.INTER_LINEAR)
-                        rr = cv2.remap(raw_r, self.map2x, self.map2y, cv2.INTER_LINEAR)
-                        gl = cv2.cvtColor(rl, cv2.COLOR_BGR2GRAY)
-                        gr = cv2.cvtColor(rr, cv2.COLOR_BGR2GRAY)
+                        if self._use_gpu:
+                            gpu_src_l = cv2.cuda_GpuMat(); gpu_src_l.upload(raw_l)
+                            gpu_src_r = cv2.cuda_GpuMat(); gpu_src_r.upload(raw_r)
+                            gpu_rl = cv2.cuda.remap(gpu_src_l, self.gpu_map1x, self.gpu_map1y, cv2.INTER_LINEAR)
+                            gpu_rr = cv2.cuda.remap(gpu_src_r, self.gpu_map2x, self.gpu_map2y, cv2.INTER_LINEAR)
+                            rl = gpu_rl.download()
+                            gpu_gl = cv2.cuda.cvtColor(gpu_rl, cv2.COLOR_BGR2GRAY)
+                            gpu_gr = cv2.cuda.cvtColor(gpu_rr, cv2.COLOR_BGR2GRAY)
+                            gl = gpu_gl.download()
+                            gr = gpu_gr.download()
+                        else:
+                            rl = cv2.remap(raw_l, self.map1x, self.map1y, cv2.INTER_LINEAR)
+                            rr = cv2.remap(raw_r, self.map2x, self.map2y, cv2.INTER_LINEAR)
+                            gl = cv2.cvtColor(rl, cv2.COLOR_BGR2GRAY)
+                            gr = cv2.cvtColor(rr, cv2.COLOR_BGR2GRAY)
                         dsp = self._compute_disparity(gl, gr)
                         dm = dsp.max() if dsp.max() > 0 else 1
                         dn = (dsp / dm * 255).astype(np.uint8)
@@ -1598,8 +1648,14 @@ class CameraApp:
                         fl = rl.copy()
                         fl[msk] = cv2.addWeighted(rl, 0.4, dc, 0.6, 0)[msk]
                         if self.compare_var.get():
-                            dsp_raw = self.stereo.compute(gl, gr)
-                            dsp_raw = dsp_raw.astype(np.float32) / 16.0
+                            if self._use_gpu:
+                                g_l = cv2.cuda_GpuMat()
+                                g_r = cv2.cuda_GpuMat()
+                                g_l.upload(gl)
+                                g_r.upload(gr)
+                                dsp_raw = self.stereo.compute(g_l, g_r).download().astype(np.float32) / 16.0
+                            else:
+                                dsp_raw = self.stereo.compute(gl, gr).astype(np.float32) / 16.0
                             dsp_raw[dsp_raw <= 0] = 0
                             common_max = max(dsp.max(), dsp_raw.max(), 1)
                             dn_r = (dsp_raw / common_max * 255).astype(np.uint8)
@@ -1674,7 +1730,8 @@ class CameraApp:
         fourcc_int = int(self.cap_l.get(cv2.CAP_PROP_FOURCC)) if self.cap_l else 0
         fmt = "".join([chr((fourcc_int >> 8*j) & 0xFF) for j in range(4)]) if fourcc_int else "?"
         exp = self.cap_l.get(cv2.CAP_PROP_EXPOSURE) if self.cap_l else 0
-        st = (f"  {self.current_w}x{self.current_h} {fmt}   "
+        gpu_tag = "GPU" if self._use_gpu else "CPU"
+        st = (f"  {self.current_w}x{self.current_h} {fmt} [{gpu_tag}]   "
               f"FPS: {fps:.1f}   "
               f"Netlik: L={sl:.0f} R={sr:.0f}   "
               f"Poz: {exp:.0f}   "
@@ -1852,27 +1909,47 @@ class CameraApp:
             K1, D1, R1, P1, image_size, cv2.CV_32FC1)
         self.map2x, self.map2y = cv2.initUndistortRectifyMap(
             K2, D2, R2, P2, image_size, cv2.CV_32FC1)
-        self.stereo = cv2.StereoSGBM_create(
-            minDisparity=0, numDisparities=256, blockSize=5,
-            P1=8*3*49, P2=32*3*49, disp12MaxDiff=1,
-            uniquenessRatio=15, speckleWindowSize=200, speckleRange=2,
-            preFilterCap=63, mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
-        self.stereo_r = cv2.ximgproc.createRightMatcher(self.stereo)
-        self.wls_filter = cv2.ximgproc.createDisparityWLSFilter(self.stereo)
-        self.wls_filter.setLambda(8000)
-        self.wls_filter.setSigmaColor(1.5)
+        if self._use_gpu:
+            self.gpu_map1x = cv2.cuda_GpuMat(); self.gpu_map1x.upload(self.map1x)
+            self.gpu_map1y = cv2.cuda_GpuMat(); self.gpu_map1y.upload(self.map1y)
+            self.gpu_map2x = cv2.cuda_GpuMat(); self.gpu_map2x.upload(self.map2x)
+            self.gpu_map2y = cv2.cuda_GpuMat(); self.gpu_map2y.upload(self.map2y)
+            self.stereo = cv2.cuda.createStereoSGM(
+                minDisparity=0, numDisparities=256, P1=10, P2=120,
+                uniquenessRatio=15, mode=0)
+            self.stereo_r = None
+            self.wls_filter = None
+        else:
+            self.stereo = cv2.StereoSGBM_create(
+                minDisparity=0, numDisparities=256, blockSize=5,
+                P1=8*3*49, P2=32*3*49, disp12MaxDiff=1,
+                uniquenessRatio=15, speckleWindowSize=200, speckleRange=2,
+                preFilterCap=63, mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
+            self.stereo_r = cv2.ximgproc.createRightMatcher(self.stereo)
+            self.wls_filter = cv2.ximgproc.createDisparityWLSFilter(self.stereo)
+            self.wls_filter.setLambda(8000)
+            self.wls_filter.setSigmaColor(1.5)
         self.hires_stereo = None
         if os.path.exists(GROUND_PATH):
             self.ground_data = np.load(GROUND_PATH)
         return True
 
     def _compute_disparity(self, gray_l, gray_r):
-        """WLS filtreli disparity hesapla ve post-processing uygula."""
-        dsp_l = self.stereo.compute(gray_l, gray_r)
-        dsp_r = self.stereo_r.compute(gray_r, gray_l)
-        dsp = self.wls_filter.filter(dsp_l, gray_l, disparity_map_right=dsp_r)
-        dsp = dsp.astype(np.float32) / 16.0
-        dsp[dsp <= 0] = 0
+        """Disparity hesapla — GPU StereoSGM + post-process, veya CPU SGBM + WLS."""
+        if self._use_gpu:
+            gpu_l = cv2.cuda_GpuMat()
+            gpu_r = cv2.cuda_GpuMat()
+            gpu_l.upload(gray_l)
+            gpu_r.upload(gray_r)
+            dsp = self.stereo.compute(gpu_l, gpu_r).download().astype(np.float32) / 16.0
+            dsp[dsp <= 0] = 0
+            dsp = cv2.medianBlur(dsp, 5)
+        else:
+            dsp_l = self.stereo.compute(gray_l, gray_r)
+            dsp_r = self.stereo_r.compute(gray_r, gray_l)
+            dsp = self.wls_filter.filter(dsp_l, gray_l, disparity_map_right=dsp_r)
+            dsp = dsp.astype(np.float32) / 16.0
+            dsp[dsp <= 0] = 0
         if hasattr(self, 'clean_disp_var') and self.clean_disp_var.get():
             dsp = self._clean_disparity(dsp)
         return dsp

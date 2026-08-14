@@ -69,6 +69,18 @@ def setup_rectify(calib):
 
 
 def setup_stereo_matcher():
+    try:
+        use_gpu = cv2.cuda.getCudaEnabledDeviceCount() > 0
+    except Exception:
+        use_gpu = False
+
+    if use_gpu:
+        stereo = cv2.cuda.createStereoSGM(
+            minDisparity=0, numDisparities=128, P1=10, P2=120,
+            uniquenessRatio=10, mode=0)
+        stereo._use_gpu = True
+        return stereo
+
     block_size = 5
     stereo = cv2.StereoSGBM_create(
         minDisparity=0,
@@ -82,6 +94,7 @@ def setup_stereo_matcher():
         speckleRange=32,
         mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY
     )
+    stereo._use_gpu = False
     return stereo
 
 
@@ -364,10 +377,16 @@ def main():
                 print("  Nesne bulunamadi! Kontrast yetersiz veya nesne yok.")
                 continue
 
-            disp = stereo.compute(
-                cv2.cvtColor(rect_l, cv2.COLOR_BGR2GRAY),
-                cv2.cvtColor(rect_r, cv2.COLOR_BGR2GRAY)
-            ).astype(np.float32) / 16.0
+            gray_l = cv2.cvtColor(rect_l, cv2.COLOR_BGR2GRAY)
+            gray_r = cv2.cvtColor(rect_r, cv2.COLOR_BGR2GRAY)
+            if getattr(stereo, '_use_gpu', False):
+                gpu_l = cv2.cuda_GpuMat()
+                gpu_r = cv2.cuda_GpuMat()
+                gpu_l.upload(gray_l)
+                gpu_r.upload(gray_r)
+                disp = stereo.compute(gpu_l, gpu_r).download().astype(np.float32) / 16.0
+            else:
+                disp = stereo.compute(gray_l, gray_r).astype(np.float32) / 16.0
 
             width, length, height, pts_3d = measure_3d_bbox(
                 contour, disp, Q, ground_normal, ground_d, mask)
