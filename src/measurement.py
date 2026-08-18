@@ -69,33 +69,52 @@ def setup_rectify(calib):
 
 
 def setup_stereo_matcher():
-    try:
-        use_gpu = cv2.cuda.getCudaEnabledDeviceCount() > 0
-    except Exception:
-        use_gpu = False
+    """CPU SGBM + WLS — camera_test.py ile ayni parametreler.
 
-    if use_gpu:
-        stereo = cv2.cuda.createStereoSGM(
-            minDisparity=0, numDisparities=128, P1=10, P2=120,
-            uniquenessRatio=10, mode=0)
-        stereo._use_gpu = True
-        return stereo
-
-    block_size = 5
+    GPU StereoSGM kullanilmiyor: GPU dalinda WLS filtresi uygulanmadigi icin
+    disparity cok gurultulu cikiyordu (bkz. docs/PROJE_KONTEXT.md bolum 5).
+    numDisparities=256: 128 ile en yakin olculebilir mesafe 794 mm olur,
+    calisma zarfi (300-900 mm) tamamen disarida kalir.
+    """
+    block_size = 7
     stereo = cv2.StereoSGBM_create(
         minDisparity=0,
-        numDisparities=128,
+        numDisparities=256,
         blockSize=block_size,
         P1=8 * 3 * block_size**2,
         P2=32 * 3 * block_size**2,
         disp12MaxDiff=1,
         uniquenessRatio=10,
-        speckleWindowSize=100,
-        speckleRange=32,
+        speckleWindowSize=200,
+        speckleRange=2,
+        preFilterCap=63,
         mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY
     )
-    stereo._use_gpu = False
-    return stereo
+    right_matcher = cv2.ximgproc.createRightMatcher(stereo)
+    wls = cv2.ximgproc.createDisparityWLSFilter(stereo)
+    wls.setLambda(8000)
+    wls.setSigmaColor(1.5)
+    return stereo, right_matcher, wls
+
+
+def compute_disparity(stereo, right_matcher, wls, gray_l, gray_r):
+    """camera_test.py ile ayni on isleme: CLAHE + parlaklik esleme + blur."""
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray_l = clahe.apply(gray_l)
+    gray_r = clahe.apply(gray_r)
+    mu_l, sig_l = gray_l.mean(), max(gray_l.std(), 1)
+    mu_r, sig_r = gray_r.mean(), max(gray_r.std(), 1)
+    gray_r = np.clip((gray_r.astype(np.float32) - mu_r) * (sig_l / sig_r) + mu_l,
+                     0, 255).astype(np.uint8)
+    gray_l = cv2.GaussianBlur(gray_l, (3, 3), 0)
+    gray_r = cv2.GaussianBlur(gray_r, (3, 3), 0)
+
+    dsp_l = stereo.compute(gray_l, gray_r)
+    dsp_r = right_matcher.compute(gray_r, gray_l)
+    disp = wls.filter(dsp_l, gray_l, disparity_map_right=dsp_r)
+    disp = disp.astype(np.float32) / 16.0
+    disp[disp <= 0] = 0
+    return disp
 
 
 def find_object_contour(frame, bg_frame, golge_bastir=True):
@@ -253,16 +272,17 @@ def append_diary(width, length, height, box_name):
     os.makedirs(os.path.dirname(DIARY_PATH), exist_ok=True)
     exists = os.path.exists(DIARY_PATH)
     with open(DIARY_PATH, "a", encoding="utf-8") as f:
+        # Sema: tarih,saat,asama,parametre,ayar,deger,birim,not (8 sutun)
         if not exists:
-            f.write("tarih,saat,asama,not1,not2,deger,birim\n")
+            f.write("tarih,saat,asama,parametre,ayar,deger,birim,not\n")
         now = datetime.datetime.now()
         date = now.strftime("%Y-%m-%d")
         time_ = now.strftime("%H:%M")
-        f.write(f"{date},{time_},olcum,en,,{width:.1f},mm\n")
-        f.write(f"{date},{time_},olcum,boy,,{length:.1f},mm\n")
-        f.write(f"{date},{time_},olcum,yukseklik,,{height:.1f},mm\n")
+        f.write(f"{date},{time_},olcum,en,,{width:.1f},mm,\n")
+        f.write(f"{date},{time_},olcum,boy,,{length:.1f},mm,\n")
+        f.write(f"{date},{time_},olcum,yukseklik,,{height:.1f},mm,\n")
         if box_name:
-            f.write(f"{date},{time_},olcum,kutu_onerisi,,{box_name},\n")
+            f.write(f"{date},{time_},olcum,kutu_onerisi,,{box_name},,\n")
 
 
 def main():
@@ -273,10 +293,18 @@ def main():
 
     calib, ground = load_all()
     map1x, map1y, map2x, map2y = setup_rectify(calib)
-    stereo = setup_stereo_matcher()
+    stereo, right_matcher, wls = setup_stereo_matcher()
     Q = calib["Q"]
-    ground_normal = ground["normal"]
+    ground_normal = np.asarray(ground["normal"], dtype=np.float64).ravel()
     ground_d = float(ground["d"])
+    # Duzlem ham kamera cercevesinde kaydedildiyse (eski ground_plane.py)
+    # rektifiye cerceveye dondur. pts_3d reprojectImageTo3D'den gelir ve
+    # REKTIFIYE cercevededir; fark R1 kadardir (bu kalibrasyonda 1.57
+    # derece) ve yukseklik olcumune dogrudan hata olarak girer.
+    cerceve = str(ground["frame"]) if "frame" in ground.files else "raw"
+    if cerceve != "rectified":
+        ground_normal = np.asarray(calib["R1"], dtype=np.float64) @ ground_normal
+    ground_normal = ground_normal / np.linalg.norm(ground_normal)
 
     image_size = tuple(calib["image_size"])
     check_resolution(image_size)
@@ -379,14 +407,7 @@ def main():
 
             gray_l = cv2.cvtColor(rect_l, cv2.COLOR_BGR2GRAY)
             gray_r = cv2.cvtColor(rect_r, cv2.COLOR_BGR2GRAY)
-            if getattr(stereo, '_use_gpu', False):
-                gpu_l = cv2.cuda_GpuMat()
-                gpu_r = cv2.cuda_GpuMat()
-                gpu_l.upload(gray_l)
-                gpu_r.upload(gray_r)
-                disp = stereo.compute(gpu_l, gpu_r).download().astype(np.float32) / 16.0
-            else:
-                disp = stereo.compute(gray_l, gray_r).astype(np.float32) / 16.0
+            disp = compute_disparity(stereo, right_matcher, wls, gray_l, gray_r)
 
             width, length, height, pts_3d = measure_3d_bbox(
                 contour, disp, Q, ground_normal, ground_d, mask)
@@ -420,9 +441,9 @@ def main():
                     with open(DIARY_PATH, "a", encoding="utf-8") as f:
                         date = now.strftime("%Y-%m-%d")
                         time_ = now.strftime("%H:%M")
-                        f.write(f"{date},{time_},yonelim_duyarliligi,fark_en,,{d_en:.1f},mm\n")
-                        f.write(f"{date},{time_},yonelim_duyarliligi,fark_boy,,{d_boy:.1f},mm\n")
-                        f.write(f"{date},{time_},yonelim_duyarliligi,fark_yuk,,{d_yuk:.1f},mm\n")
+                        f.write(f"{date},{time_},yonelim_duyarliligi,fark_en,,{d_en:.1f},mm,\n")
+                        f.write(f"{date},{time_},yonelim_duyarliligi,fark_boy,,{d_boy:.1f},mm,\n")
+                        f.write(f"{date},{time_},yonelim_duyarliligi,fark_yuk,,{d_yuk:.1f},mm,\n")
                     print("  Olcum defterine yazildi.")
                     orientation_0 = None
                     continue

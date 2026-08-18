@@ -19,7 +19,6 @@ import json
 import argparse
 import numpy as np
 import cv2
-from PIL import Image, ImageTk
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -135,9 +134,36 @@ def main():
     image_size = tuple(calib["image_size"])
     w, h = image_size
 
+    # Duzlem, derinlik noktalariyla AYNI koordinat cercevesinde olmali.
+    # reprojectImageTo3D ciktisi REKTIFIYE sol kamera cercevesindedir.
+    # Ham goruntude solvePnP ise HAM cerceveyi verir; ikisi R1 kadar
+    # (bu kalibrasyonda 1.57 derece) farklidir ve masa uzerinde 200 mm
+    # yanda ~5 mm yukseklik hatasina yol acar.
+    # Bu yuzden: rektifiye goruntude coz, intrinsik = P1[:3,:3],
+    # distorsiyon = 0 (remap zaten gidermistir).
+    map1x, map1y = cv2.initUndistortRectifyMap(
+        K1, D1, calib["R1"], calib["P1"], image_size, cv2.CV_32FC1)
+    K_rect = np.asarray(calib["P1"], dtype=np.float64)[:3, :3]
+    D_rect = np.zeros(5, dtype=np.float64)
+
     cap = cv2.VideoCapture(args.left, cv2.CAP_MSMF)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+
+    if not cap.isOpened():
+        print("HATA: Kamera acilamadi!")
+        sys.exit(1)
+
+    # Gercek kare boyutu kalibrasyonla ayni olmali — K1/D1 cozunurluge baglidir
+    real_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    real_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if (real_w, real_h) != (w, h):
+        print(f"HATA: Kamera {real_w}x{real_h} verdi, kalibrasyon {w}x{h}.")
+        print("  Ayni cozunurluk saglanamadan zemin duzlemi hesaplanamaz")
+        print("  (K1/D1 kalibrasyon cozunurlugune baglidir).")
+        cap.release()
+        sys.exit(1)
 
     print("=" * 50)
     print("ZEMIN DUZLEMI TESPITI")
@@ -156,8 +182,10 @@ def main():
             continue
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.remap(gray, map1x, map1y, cv2.INTER_LINEAR)
+        frame = cv2.remap(frame, map1x, map1y, cv2.INTER_LINEAR)
         normal, d, cc, n_corners = detect_and_solve(
-            gray, board, detector, K1, D1)
+            gray, board, detector, K_rect, D_rect)
 
         display = frame.copy()
         if cc is not None:
@@ -193,15 +221,21 @@ def main():
         if key == 27:
             break
         elif key == 32 and normal is not None:
+            # Aci bir hata olcutu DEGIL: kamera masaya egik baktiginda
+            # duzlem normali ile optik eksen arasindaki aci dogal olarak
+            # 40-50 derece cikar, tahta yine de masaya duz yatiyordur.
+            # Sadece cok siyirtma acisinda uyar, engelleme.
             angle = np.degrees(np.arccos(abs(normal[2])))
-            if angle > 15:
-                print(f"UYARI: Desen {angle:.1f} derece egik. Duzeltin.")
-                continue
+            if angle > 70:
+                print(f"UYARI: {angle:.1f} derece cok siyirtma acisi, "
+                      "duzlem hassasiyeti dusuk olabilir.")
 
             np.savez(OUT_PATH,
                      normal=normal,
                      d=d,
-                     K=K1, D=D1)
+                     K=K_rect, D=D_rect,
+                     frame="rectified",
+                     n_corners=n_corners)
             print(f"\nZemin duzlemi kaydedildi: {OUT_PATH}")
             print(f"  Normal: [{normal[0]:.4f}, {normal[1]:.4f}, {normal[2]:.4f}]")
             print(f"  d: {d:.4f}")

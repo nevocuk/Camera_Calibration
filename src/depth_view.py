@@ -71,32 +71,25 @@ def main():
     map2x, map2y = cv2.initUndistortRectifyMap(K2, D2, R2, P2, image_size, cv2.CV_32FC1)
 
     # Stereo eslestirici
-    num_disp = 384
-    block_size = 5
-    try:
-        use_gpu = cv2.cuda.getCudaEnabledDeviceCount() > 0
-    except Exception:
-        use_gpu = False
-
-    if use_gpu:
-        stereo = cv2.cuda.createStereoSGM(
-            minDisparity=0, numDisparities=num_disp, P1=10, P2=120,
-            uniquenessRatio=10, mode=0)
-        print("  GPU: CUDA StereoSGM aktif")
-    else:
-        stereo = cv2.StereoSGBM_create(
-            minDisparity=0,
-            numDisparities=num_disp,
-            blockSize=block_size,
-            P1=8 * 3 * block_size ** 2,
-            P2=32 * 3 * block_size ** 2,
-            disp12MaxDiff=1,
-            uniquenessRatio=10,
-            speckleWindowSize=100,
-            speckleRange=32,
-            preFilterCap=63,
-            mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
-        )
+    # CPU SGBM + WLS. GPU StereoSGM kullanilmiyor: GPU dalinda WLS
+    # uygulanmadigi icin disparity gurultulu cikiyordu.
+    # Parametreler camera_test.py ile ayni tutuldu.
+    num_disp = 256
+    block_size = 7
+    use_gpu = False
+    stereo = cv2.StereoSGBM_create(
+        minDisparity=0,
+        numDisparities=num_disp,
+        blockSize=block_size,
+        P1=8 * 3 * block_size ** 2,
+        P2=32 * 3 * block_size ** 2,
+        disp12MaxDiff=1,
+        uniquenessRatio=10,
+        speckleWindowSize=200,
+        speckleRange=2,
+        preFilterCap=63,
+        mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+    )
 
     # WLS filtre — gurultu temizleme
     use_wls = True
@@ -146,7 +139,7 @@ def main():
     print()
     print(f"  Cozunurluk: {w}x{h}")
     print(f"  Baseline: {np.linalg.norm(calib['T'])* 1000:.1f} mm")
-    print(f"  fx: {K1[0,0]:.0f} px")
+    print(f"  fx (rektifiye, P1): {P1[0,0]:.0f} px   [ham K1: {K1[0,0]:.0f} px]")
     print()
 
     capture_count = 0
@@ -169,22 +162,14 @@ def main():
         # 2. Disparity hesapla (gri tonlamada)
         gray_l = cv2.cvtColor(rect_l, cv2.COLOR_BGR2GRAY)
         gray_r = cv2.cvtColor(rect_r, cv2.COLOR_BGR2GRAY)
-        if use_gpu:
-            gpu_l = cv2.cuda_GpuMat()
-            gpu_r = cv2.cuda_GpuMat()
-            gpu_l.upload(gray_l)
-            gpu_r.upload(gray_r)
-            gpu_disp = stereo.compute(gpu_l, gpu_r)
-            disparity = gpu_disp.download().astype(np.float32) / 16.0
+        disp_left = stereo.compute(gray_l, gray_r)
+        if use_wls:
+            disp_right = right_matcher.compute(gray_r, gray_l)
+            disparity = wls_filter.filter(
+                disp_left, gray_l, None, disp_right
+            ).astype(np.float32) / 16.0
         else:
-            disp_left = stereo.compute(gray_l, gray_r)
-            if use_wls:
-                disp_right = right_matcher.compute(gray_r, gray_l)
-                disparity = wls_filter.filter(
-                    disp_left, gray_l, None, disp_right
-                ).astype(np.float32) / 16.0
-            else:
-                disparity = disp_left.astype(np.float32) / 16.0
+            disparity = disp_left.astype(np.float32) / 16.0
 
         # 3. Normalizasyon (0-255 arasi)
         disp_valid = disparity.copy()

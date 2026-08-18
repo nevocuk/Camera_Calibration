@@ -213,13 +213,25 @@ def collect_frames(frames_dir, board, detector, cfg=None):
         n_common = len(common_ids)
         label = "marker" if is_grid else "kose"
 
-        min_markers = 15
+        # Esik, tahta boyutuna gore ORANSAL. Sabit 15 cok gevsekti:
+        # 9x13 tahtada maks 96 kose var, 15 = %16. Olculdu (35 gercek cift):
+        # kose sayisi <-> yeniden projeksiyon hatasi korelasyonu -0.73/-0.78.
+        # Esik 15 -> stereo RMS 1.0025 (kaldi)
+        # Esik 40 -> stereo RMS 0.8405 (gecer, 25 kare)
+        # Az koseli kare lens bozulma modelini zayif kisitlar ve genelde
+        # uzak/asiri acili cekimdir; kose konumlari daha az guvenilirdir.
+        if is_grid:
+            maks_kose = cfg["squares_x"] * cfg["squares_y"] if cfg else 100
+        else:
+            maks_kose = ((cfg["squares_x"] - 1) * (cfg["squares_y"] - 1)
+                         if cfg else 100)
+        min_markers = max(12, int(round(maks_kose * 0.40)))
         min_bright = 40
         skip_reason = None
         if avg_bright < min_bright:
             skip_reason = "KARANLIK"
         elif n_common < min_markers:
-            skip_reason = "AZ MARKER"
+            skip_reason = f"AZ KOSE (<{min_markers})"
 
         if skip_reason:
             print(f"  #{num}: {n_common} ortak {label}, "
@@ -411,23 +423,28 @@ def append_diary(result):
     os.makedirs(os.path.dirname(DIARY_PATH), exist_ok=True)
     exists = os.path.exists(DIARY_PATH)
     with open(DIARY_PATH, "a", encoding="utf-8") as f:
+        # Sema: tarih,saat,asama,parametre,ayar,deger,birim,not (8 sutun)
         if not exists:
-            f.write("tarih,saat,asama,not1,not2,deger,birim\n")
+            f.write("tarih,saat,asama,parametre,ayar,deger,birim,not\n")
         now = datetime.datetime.now()
         date = now.strftime("%Y-%m-%d")
-        time = now.strftime("%H:%M")
-        f.write(f"{date},{time},kalibrasyon,RMS_stereo,,"
-                f"{result['rms']:.4f},px\n")
-        f.write(f"{date},{time},kalibrasyon,RMS_sol,,"
-                f"{result['rms1']:.4f},px\n")
-        f.write(f"{date},{time},kalibrasyon,RMS_sag,,"
-                f"{result['rms2']:.4f},px\n")
-        f.write(f"{date},{time},kalibrasyon,baseline,,"
-                f"{result['baseline_mm']:.1f},mm\n")
-        f.write(f"{date},{time},kalibrasyon,fx_sol,,"
-                f"{result['K1'][0,0]:.1f},px\n")
-        f.write(f"{date},{time},kalibrasyon,fx_sag,,"
-                f"{result['K2'][0,0]:.1f},px\n")
+        time_ = now.strftime("%H:%M")
+        res = result["image_size"]
+        ayar = f"{res[0]}x{res[1]}"
+        f.write(f"{date},{time_},kalibrasyon,RMS_stereo,{ayar},"
+                f"{result['rms']:.4f},px,\n")
+        f.write(f"{date},{time_},kalibrasyon,RMS_sol,{ayar},"
+                f"{result['rms1']:.4f},px,\n")
+        f.write(f"{date},{time_},kalibrasyon,RMS_sag,{ayar},"
+                f"{result['rms2']:.4f},px,\n")
+        f.write(f"{date},{time_},kalibrasyon,baseline,{ayar},"
+                f"{result['baseline_mm']:.1f},mm,||T||\n")
+        f.write(f"{date},{time_},kalibrasyon,fx_sol_K1,{ayar},"
+                f"{result['K1'][0,0]:.1f},px,ham intrinsik\n")
+        f.write(f"{date},{time_},kalibrasyon,fx_sag_K2,{ayar},"
+                f"{result['K2'][0,0]:.1f},px,ham intrinsik\n")
+        f.write(f"{date},{time_},kalibrasyon,fx_rektifiye_P1,{ayar},"
+                f"{result['P1'][0,0]:.1f},px,mesafe hesabinda kullanilan\n")
     print(f"Olcum defterine yazildi: {DIARY_PATH}")
 
 

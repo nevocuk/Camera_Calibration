@@ -3,11 +3,12 @@ Kutu onerisi ve RSC kesim sablonu uretici.
 
 Kullanim:
     python src/box_output.py --en 250 --boy 180 --yukseklik 120
-    python src/box_output.py --en 250 --boy 180 --yukseklik 120 --pdf
+    python src/box_output.py --en 250 --boy 180 --yukseklik 120 --no-svg
 
 Cikti:
     - Terminale kutu onerisi
-    - output/box_templates/ altina kesim sablonu (PDF)
+    - output/box_templates/ altina RSC kesim sablonu (SVG — yazdirmadan
+      once PDF'e cevir; SVG olculer mm cinsinden 1:1'dir)
 """
 import os
 import sys
@@ -186,7 +187,8 @@ def main():
     p.add_argument("--boy", type=float, required=True, help="Nesne boyu (mm)")
     p.add_argument("--yukseklik", type=float, required=True, help="Nesne yuksekligi (mm)")
     p.add_argument("--margin", type=float, default=10, help="Kutu pay (mm)")
-    p.add_argument("--svg", action="store_true", help="SVG kesim sablonu uret")
+    p.add_argument("--no-svg", action="store_true",
+                   help="SVG kesim sablonu uretme (varsayilan: uretir)")
     args = p.parse_args()
 
     boxes = load_boxes()
@@ -215,7 +217,7 @@ def main():
         best = candidates[0][1]
         print(f"\n  ONERILEN: {best['isim']}")
 
-    if args.svg or True:
+    if not args.no_svg:
         box_en = args.en + args.margin
         box_boy = args.boy + args.margin
         box_yuk = args.yukseklik + args.margin
@@ -233,15 +235,16 @@ def main():
     os.makedirs(os.path.dirname(DIARY_PATH), exist_ok=True)
     exists = os.path.exists(DIARY_PATH)
     with open(DIARY_PATH, "a", encoding="utf-8") as f:
+        # Sema: tarih,saat,asama,parametre,ayar,deger,birim,not (8 sutun)
         if not exists:
-            f.write("tarih,saat,asama,not1,not2,deger,birim\n")
+            f.write("tarih,saat,asama,parametre,ayar,deger,birim,not\n")
         date = now.strftime("%Y-%m-%d")
-        time = now.strftime("%H:%M")
+        time_ = now.strftime("%H:%M")
         if candidates:
             best = candidates[0][1]
-            f.write(f"{date},{time},kutu_onerisi,{best['isim']},"
+            f.write(f"{date},{time_},kutu_onerisi,{best['isim']},"
                     f"{args.en:.0f}x{args.boy:.0f}x{args.yukseklik:.0f},"
-                    f"{best['desi']:.1f},desi\n")
+                    f"{best['desi']:.1f},desi,\n")
 
 
 if __name__ == "__main__":
