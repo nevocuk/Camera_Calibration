@@ -1,46 +1,46 @@
 tarih,saat,asama,parametre,ayar,deger,birim,not
-2026-08-11,00:52,kalibrasyon,RMS_stereo,,0.7401,px
-2026-08-11,00:52,kalibrasyon,RMS_sol,,0.6635,px
-2026-08-11,00:52,kalibrasyon,RMS_sag,,0.7398,px
-2026-08-11,00:52,kalibrasyon,baseline,,73.6,mm
-2026-08-11,00:52,kalibrasyon,fx_sol,,807.4,px
-2026-08-11,00:52,kalibrasyon,fx_sag,,810.5,px
-2026-08-11,13:42,kalibrasyon,RMS_stereo,,139599626717561712.0000,px
-2026-08-11,13:42,kalibrasyon,RMS_sol,,202.0504,px
-2026-08-11,13:42,kalibrasyon,RMS_sag,,196.1370,px
-2026-08-11,13:42,kalibrasyon,baseline,,51.4,mm
-2026-08-11,13:42,kalibrasyon,fx_sol,,1597.6,px
-2026-08-11,13:42,kalibrasyon,fx_sag,,1549.9,px
-2026-08-11,13:43,kalibrasyon,RMS_stereo,,2740626181555898.5000,px
-2026-08-11,13:43,kalibrasyon,RMS_sol,,202.7517,px
-2026-08-11,13:43,kalibrasyon,RMS_sag,,196.1895,px
-2026-08-11,13:43,kalibrasyon,baseline,,29.3,mm
-2026-08-11,13:43,kalibrasyon,fx_sol,,1597.6,px
-2026-08-11,13:43,kalibrasyon,fx_sag,,1549.9,px
-2026-08-11,14:16,kalibrasyon,RMS_stereo,,0.7993,px
-2026-08-11,14:16,kalibrasyon,RMS_sol,,0.7617,px
-2026-08-11,14:16,kalibrasyon,RMS_sag,,0.6635,px
-2026-08-11,14:16,kalibrasyon,baseline,,71.6,mm
-2026-08-11,14:16,kalibrasyon,fx_sol,,803.9,px
-2026-08-11,14:16,kalibrasyon,fx_sag,,803.2,px
-2026-08-11,14:18,kalibrasyon,RMS_stereo,,0.7993,px
-2026-08-11,14:18,kalibrasyon,RMS_sol,,0.7617,px
-2026-08-11,14:18,kalibrasyon,RMS_sag,,0.6635,px
-2026-08-11,14:18,kalibrasyon,baseline,,71.6,mm
-2026-08-11,14:18,kalibrasyon,fx_sol,,803.9,px
-2026-08-11,14:18,kalibrasyon,fx_sag,,803.2,px
-2026-08-11,16:22,kalibrasyon,RMS_stereo,,0.6361,px
-2026-08-11,16:22,kalibrasyon,RMS_sol,,0.5179,px
-2026-08-11,16:22,kalibrasyon,RMS_sag,,0.5269,px
-2026-08-11,16:22,kalibrasyon,baseline,,71.7,mm
-2026-08-11,16:22,kalibrasyon,fx_sol,,809.6,px
-2026-08-11,16:22,kalibrasyon,fx_sag,,812.8,px
-2026-08-11,16:31,kalibrasyon,RMS_stereo,,0.6109,px
-2026-08-11,16:31,kalibrasyon,RMS_sol,,0.4384,px
-2026-08-11,16:31,kalibrasyon,RMS_sag,,0.4459,px
-2026-08-11,16:31,kalibrasyon,baseline,,71.6,mm
-2026-08-11,16:31,kalibrasyon,fx_sol,,808.6,px
-2026-08-11,16:31,kalibrasyon,fx_sag,,815.2,px
+2026-08-11,00:52,kalibrasyon,RMS_stereo,,0.7401,px,
+2026-08-11,00:52,kalibrasyon,RMS_sol,,0.6635,px,
+2026-08-11,00:52,kalibrasyon,RMS_sag,,0.7398,px,
+2026-08-11,00:52,kalibrasyon,baseline,,73.6,mm,
+2026-08-11,00:52,kalibrasyon,fx_sol,,807.4,px,
+2026-08-11,00:52,kalibrasyon,fx_sag,,810.5,px,
+2026-08-11,13:42,kalibrasyon,RMS_stereo,,139599626717561712.0000,px,
+2026-08-11,13:42,kalibrasyon,RMS_sol,,202.0504,px,
+2026-08-11,13:42,kalibrasyon,RMS_sag,,196.1370,px,
+2026-08-11,13:42,kalibrasyon,baseline,,51.4,mm,
+2026-08-11,13:42,kalibrasyon,fx_sol,,1597.6,px,
+2026-08-11,13:42,kalibrasyon,fx_sag,,1549.9,px,
+2026-08-11,13:43,kalibrasyon,RMS_stereo,,2740626181555898.5000,px,
+2026-08-11,13:43,kalibrasyon,RMS_sol,,202.7517,px,
+2026-08-11,13:43,kalibrasyon,RMS_sag,,196.1895,px,
+2026-08-11,13:43,kalibrasyon,baseline,,29.3,mm,
+2026-08-11,13:43,kalibrasyon,fx_sol,,1597.6,px,
+2026-08-11,13:43,kalibrasyon,fx_sag,,1549.9,px,
+2026-08-11,14:16,kalibrasyon,RMS_stereo,,0.7993,px,
+2026-08-11,14:16,kalibrasyon,RMS_sol,,0.7617,px,
+2026-08-11,14:16,kalibrasyon,RMS_sag,,0.6635,px,
+2026-08-11,14:16,kalibrasyon,baseline,,71.6,mm,
+2026-08-11,14:16,kalibrasyon,fx_sol,,803.9,px,
+2026-08-11,14:16,kalibrasyon,fx_sag,,803.2,px,
+2026-08-11,14:18,kalibrasyon,RMS_stereo,,0.7993,px,
+2026-08-11,14:18,kalibrasyon,RMS_sol,,0.7617,px,
+2026-08-11,14:18,kalibrasyon,RMS_sag,,0.6635,px,
+2026-08-11,14:18,kalibrasyon,baseline,,71.6,mm,
+2026-08-11,14:18,kalibrasyon,fx_sol,,803.9,px,
+2026-08-11,14:18,kalibrasyon,fx_sag,,803.2,px,
+2026-08-11,16:22,kalibrasyon,RMS_stereo,,0.6361,px,
+2026-08-11,16:22,kalibrasyon,RMS_sol,,0.5179,px,
+2026-08-11,16:22,kalibrasyon,RMS_sag,,0.5269,px,
+2026-08-11,16:22,kalibrasyon,baseline,,71.7,mm,
+2026-08-11,16:22,kalibrasyon,fx_sol,,809.6,px,
+2026-08-11,16:22,kalibrasyon,fx_sag,,812.8,px,
+2026-08-11,16:31,kalibrasyon,RMS_stereo,,0.6109,px,
+2026-08-11,16:31,kalibrasyon,RMS_sol,,0.4384,px,
+2026-08-11,16:31,kalibrasyon,RMS_sag,,0.4459,px,
+2026-08-11,16:31,kalibrasyon,baseline,,71.6,mm,
+2026-08-11,16:31,kalibrasyon,fx_sol,,808.6,px,
+2026-08-11,16:31,kalibrasyon,fx_sag,,815.2,px,
 2026-08-13,16:50,odak_testi,mesafe,200,1063,laplacian_var,sol=1223 sag=902
 2026-08-13,16:50,odak_testi,mesafe,300,533,laplacian_var,sol=815 sag=250
 2026-08-13,16:50,odak_testi,mesafe,400,792,laplacian_var,sol=800 sag=785
@@ -50,9 +50,35 @@ tarih,saat,asama,parametre,ayar,deger,birim,not
 2026-08-13,16:50,odak_testi,mesafe,800,381,laplacian_var,sol=330 sag=433
 2026-08-13,16:50,odak_testi,net_alan_sol,,200-600,mm,tepe=1223
 2026-08-13,16:50,odak_testi,net_alan_sag,,200-600,mm,tepe=902
-2026-08-14,14:54,kalibrasyon,RMS_stereo,,0.7323,px
-2026-08-14,14:54,kalibrasyon,RMS_sol,,0.5932,px
-2026-08-14,14:54,kalibrasyon,RMS_sag,,0.6054,px
-2026-08-14,14:54,kalibrasyon,baseline,,71.6,mm
-2026-08-14,14:54,kalibrasyon,fx_sol,,1292.0,px
-2026-08-14,14:54,kalibrasyon,fx_sag,,1292.5,px
+2026-08-14,14:54,kalibrasyon,RMS_stereo,,0.7323,px,
+2026-08-14,14:54,kalibrasyon,RMS_sol,,0.5932,px,
+2026-08-14,14:54,kalibrasyon,RMS_sag,,0.6054,px,
+2026-08-14,14:54,kalibrasyon,baseline,,71.6,mm,
+2026-08-14,14:54,kalibrasyon,fx_sol,,1292.0,px,
+2026-08-14,14:54,kalibrasyon,fx_sag,,1292.5,px,
+2026-08-16,16:52,kalibrasyon,RMS_stereo,,0.7407,px,
+2026-08-16,16:52,kalibrasyon,RMS_sol,,0.5950,px,
+2026-08-16,16:52,kalibrasyon,RMS_sag,,0.6241,px,
+2026-08-16,16:52,kalibrasyon,baseline,,71.6,mm,
+2026-08-16,16:52,kalibrasyon,fx_sol,,1291.8,px,
+2026-08-16,16:52,kalibrasyon,fx_sag,,1292.3,px,
+2026-08-16,20:04,dogrulama_GECERSIZ,olculen_mesafe,poz=-2 gain=0 wb=4500,1962.9,mm,nisan arka planda - cisim olculmedi
+2026-08-16,20:04,dogrulama_GECERSIZ,olculen_mesafe,poz=-2 gain=0 wb=4500,2260.0,mm,nisan arka planda - cisim olculmedi
+2026-08-16,20:06,dogrulama_GECERSIZ,olculen_mesafe,poz=-2 gain=0 wb=4500,2007.7,mm,nisan arka planda - cisim olculmedi
+2026-08-17,09:04,kutu_onerisi,No.5 koli,250x180x120,3.0,desi,
+2026-08-17,09:05,kutu_onerisi,No.4 koli,100x100x100,2.5,desi,
+2026-08-17,09:05,kutu_onerisi,No.4 koli,100x100x100,2.5,desi,
+2026-08-18,09:26,kalibrasyon,RMS_stereo,2048x1536,1.0053,px,
+2026-08-18,09:26,kalibrasyon,RMS_sol,2048x1536,0.8948,px,
+2026-08-18,09:26,kalibrasyon,RMS_sag,2048x1536,0.9771,px,
+2026-08-18,09:26,kalibrasyon,baseline,2048x1536,71.8,mm,||T||
+2026-08-18,09:26,kalibrasyon,fx_sol_K1,2048x1536,1288.9,px,ham intrinsik
+2026-08-18,09:26,kalibrasyon,fx_sag_K2,2048x1536,1288.7,px,ham intrinsik
+2026-08-18,09:26,kalibrasyon,fx_rektifiye_P1,2048x1536,1408.2,px,mesafe hesabinda kullanilan
+2026-08-18,09:41,kalibrasyon,RMS_stereo,2048x1536,0.8340,px,
+2026-08-18,09:41,kalibrasyon,RMS_sol,2048x1536,0.7703,px,
+2026-08-18,09:41,kalibrasyon,RMS_sag,2048x1536,0.7682,px,
+2026-08-18,09:41,kalibrasyon,baseline,2048x1536,71.8,mm,||T||
+2026-08-18,09:41,kalibrasyon,fx_sol_K1,2048x1536,1288.3,px,ham intrinsik
+2026-08-18,09:41,kalibrasyon,fx_sag_K2,2048x1536,1290.8,px,ham intrinsik
+2026-08-18,09:41,kalibrasyon,fx_rektifiye_P1,2048x1536,1418.2,px,mesafe hesabinda kullanilan

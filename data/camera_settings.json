@@ -1,5 +1,5 @@
 {
-  "exposure": -2,
+  "exposure": -4,
   "gain": 0,
   "wb": 4500,
   "exp_offset_r": 0,
@@ -9,7 +9,8 @@
   "contrast": 32,
   "saturation": 64,
   "sharpness": 3,
+  "gamma": 100,
   "resolution": "2048x1536 ~30fps",
-  "left_idx": 1,
-  "right_idx": 2
+  "left_idx": 2,
+  "right_idx": 1
 }

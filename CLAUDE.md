@@ -1,3 +1,5 @@
+@docs/PROJE_KONTEXT.md
+
 # Stereo Kamera Projesi — Ortak Kurallar
 
 ## Dil

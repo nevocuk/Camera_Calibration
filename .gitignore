@@ -25,17 +25,22 @@ Desktop.ini
 # Claude Code
 .claude/
 
-# Kalibrasyon frame'leri (cok buyuk, repoya koymuyoruz)
-calibration/frames/
-calibration/frames_set_1/
-calibration/frames_set_2/
-calibration/frames_eski_4x4/
+# Kalibrasyon kareleri ve yedekleri (cok buyuk, repoya koymuyoruz).
+# Yedekler DISKTE durur; git bir yedekleme sistemi degil. Bir kez
+# commit edilirlerse gecmisten temizlenmeleri cok zor olur.
+# (frames_set_3 + frames_set_4 tek basina 428 MB.)
+calibration/frames*/
 calibration/debug_*.png
 
-# Depth capture ciktilari
-output/depth_captures/
-output/reports/
-output/box_templates/
+# Sonuc dosyalari KUCUK ve degerli - bunlar versiyonlanir:
+!calibration/calib_result.npz
+!calibration/ground_plane.npz
+
+# output/ tamamen URETILEN veridir, versiyonlanmaz.
+# (depth_captures tek basina 1.1 GB; teshis PNG'leri 14 MB ve
+#  scriptler yeniden uretebiliyor. Rapora girecek gorseller
+#  rapor dosyasina gomulur.)
+output/
 
 # Ekran goruntuleri ve sunumlar (repoya gerekmiyor)
 Ekran görüntüsü*

@@ -1,0 +1,14 @@
+# Varsayilan: metin dosyalarinda satir sonu normalize edilsin
+* text=auto
+
+# IKILI DOSYALAR - git bunlara ASLA satir sonu donusumu uygulamamali.
+# core.autocrlf=true ve .gitattributes yokken git ikili dosyayi metin
+# sanabilir; bir .npz'de CR/LF donusumu kalibrasyonu SESSIZCE bozar.
+*.npz  binary
+*.npy  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.pdf  binary
+*.docx binary
+*.xlsx binary

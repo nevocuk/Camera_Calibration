@@ -1,14 +1,14 @@
-"""
-Stereo Kamera — Tam Pipeline Araci v4
+﻿"""
+Stereo Kamera - Tam Pipeline Araci v4
 
 Tek pencerede tum islemler:
-  Tab 1: Ayarlar — cozunurluk, pozlama, gain, WB + canli degerler
-  Tab 2: Hesaplama — deltaZ hesaplayici, calisma zarfi
-  Tab 3: Kalibrasyon — desen tespiti, kare toplama, kalibre et
-  Tab 4: Derinlik — canli disparity/derinlik haritasi
-  Tab 5: Olcum — nesne olcumu + kutu onerisi
-  Tab 6: Durum — pipeline durumu, olcum defteri
-  Tab 7: Rehber — adim adim ne yapilacak
+  Tab 1: Ayarlar - cozunurluk, pozlama, gain, WB + canli degerler
+  Tab 2: Hesaplama - deltaZ hesaplayici, calisma zarfi
+  Tab 3: Kalibrasyon - desen tespiti, kare toplama, kalibre et
+  Tab 4: Derinlik - canli disparity/derinlik haritasi
+  Tab 5: Olcum - nesne olcumu + kutu onerisi
+  Tab 6: Durum - pipeline durumu, olcum defteri
+  Tab 7: Rehber - adim adim ne yapilacak
 """
 import cv2
 import numpy as np
@@ -17,6 +17,7 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import threading
 import subprocess
+import sys
 import time
 import os
 import json
@@ -41,7 +42,7 @@ RESOLUTIONS = [
     ("1280x960 ~30fps", 1280, 960, "MJPG"),
     ("1920x1080 ~30fps", 1920, 1080, "MJPG"),
     ("2048x1536 ~30fps", 2048, 1536, "MJPG"),
-    ("3840x2160 ~1fps (sadece 4K foto)", 3840, 2160, "MJPG"),
+    ("3840x2160 ~1fps (canli icin uygun degil)", 3840, 2160, "MJPG"),
 ]
 
 # Renkler
@@ -91,12 +92,7 @@ def load_charuco():
         use_legacy = not cfg["aruco_dict"].startswith("DICT_APRILTAG")
         if use_legacy:
             board.setLegacyPattern(True)
-        params = cv2.aruco.DetectorParameters()
-        params.adaptiveThreshWinSizeMax = 73
-        params.adaptiveThreshWinSizeStep = 2
-        charuco_params = cv2.aruco.CharucoParameters()
-        detector = cv2.aruco.CharucoDetector(board, charuco_params,
-                                              params)
+        detector = cv2.aruco.CharucoDetector(board)
         max_corners = (cfg["squares_x"] - 1) * (cfg["squares_y"] - 1)
 
     return board, detector, max_corners, cfg
@@ -129,16 +125,29 @@ class SpinSlider(tk.Frame):
                                insertbackground=YELLOW, borderwidth=1,
                                relief="flat", justify="center")
         self.entry.pack(side=tk.LEFT, padx=(4, 0))
-        self.entry.insert(0, str(var.get()))
+        self.entry.insert(0, self._fmt(var.get()))
         self.entry.bind("<Return>", self._on_entry)
         self.entry.bind("<FocusOut>", self._on_entry)
 
+        # Degisken disaridan set() edilirse (ayar yukleme, sifirlama,
+        # kalibrasyondan otomatik doldurma) kutu metni de takip etsin
+        var.trace_add("write", self._sync_entry)
+
+    def _fmt(self, val):
+        return str(int(float(val))) if self.res >= 1 else f"{float(val):.2f}"
+
+    def _sync_entry(self, *_):
+        try:
+            new = self._fmt(self.var.get())
+        except (ValueError, tk.TclError):
+            return
+        if self.entry.get() != new:
+            self.entry.delete(0, tk.END)
+            self.entry.insert(0, new)
+
     def _on_scale(self, val):
         self.entry.delete(0, tk.END)
-        if self.res >= 1:
-            self.entry.insert(0, str(int(float(val))))
-        else:
-            self.entry.insert(0, f"{float(val):.2f}")
+        self.entry.insert(0, self._fmt(val))
         self.cmd()
 
     def _on_entry(self, event=None):
@@ -153,7 +162,7 @@ class SpinSlider(tk.Frame):
 class CameraApp:
     def __init__(self, root, left_idx, right_idx):
         self.root = root
-        self.root.title("Stereo Kamera — Kalibrasyon Hazirlama")
+        self.root.title("Stereo Kamera - Kalibrasyon Hazirlama")
         self.root.configure(bg=BG)
         self.root.geometry("1500x850")
         self.root.minsize(1100, 650)
@@ -185,20 +194,28 @@ class CameraApp:
         self.peak_l = 0.0
         self.peak_r = 0.0
 
-        # GPU destegi
-        try:
-            self._use_gpu = cv2.cuda.getCudaEnabledDeviceCount() > 0
-        except Exception:
-            self._use_gpu = False
-
         # Derinlik/olcum state
         self.depth_mode = False
+        self._quality_frozen = False
         self.calib_data = None
         self.ground_data = None
         self.map1x = self.map1y = self.map2x = self.map2y = None
         self.stereo = None
         self.bg_frame_l = None
         self.measure_result = None
+        self._click_point = None
+        self._display_scale = 1.0
+        self._display_fl_w = 0
+        self._current_dsp = None
+        # Derinlik ayri thread'de hesaplanir (ana thread donmesin)
+        self._depth_lock = threading.Lock()
+        self._depth_result = None
+        self._depth_thread = None
+        self._raw_disp = None
+        self._last_raw_mask = None
+        self._last_quality = ""
+        self._num_disp = 256          # disparity arama araligi (yakin sinir)
+        self._sgbm_cache = {}
 
         self._load_settings()
         self._build_ui()
@@ -215,6 +232,7 @@ class CameraApp:
         main.add(cam_container, stretch="always")
         self.cam_label = tk.Label(cam_container, bg="#000")
         self.cam_label.pack(fill=tk.BOTH, expand=True)
+        self.cam_label.bind("<Button-1>", self._on_cam_click)
 
         # Status bar
         self.status_bar = tk.Label(cam_container, text="", bg=CARD, fg=FG,
@@ -267,6 +285,15 @@ class CameraApp:
         content.pack(fill=tk.X, padx=8, pady=(4, 0))
         return content
 
+    @staticmethod
+    def _key_guard(action):
+        """Kisayol tusu - Entry/Text icine yaziliyorsa tetiklenmez."""
+        def handler(event):
+            if isinstance(event.widget, (tk.Entry, ttk.Entry, tk.Text)):
+                return
+            action()
+        return handler
+
     def _info_row(self, parent, label, value="", color=FG):
         row = tk.Frame(parent, bg=CARD)
         row.pack(fill=tk.X, pady=2)
@@ -277,7 +304,7 @@ class CameraApp:
         lbl.pack(side=tk.RIGHT)
         return lbl
 
-    # ── Tab: Ayarlar ──────────────────────────────────
+    # â”€â”€ Tab: Ayarlar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build_tab_settings(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Ayarlar  ")
@@ -339,9 +366,11 @@ class CameraApp:
 
         # SAG kamera telafi
         c = self._section(sf, "SAG kamera telafisi")
-        tk.Label(c, text="Sol kameranin degerine eklenir",
-                 bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w")
-        self.exp_offset_r = tk.IntVar(value=1)
+        tk.Label(c, text=("SAG kameraya uygulanir:  sag = sol + telafi\n"
+                          "0 = iki kamera ayni ayarda (varsayilan)"),
+                 bg=CARD, fg=MUTED, font=("Segoe UI", 9),
+                 justify="left").pack(anchor="w")
+        self.exp_offset_r = tk.IntVar(value=0)
         self.gain_offset_r = tk.DoubleVar(value=0)
         self.bright_offset_r = tk.IntVar(value=0)
         SpinSlider(c, "Pozlama telafi", self.exp_offset_r, -5, 5,
@@ -350,6 +379,22 @@ class CameraApp:
                     self._on_gain, resolution=1).pack(fill=tk.X, pady=2)
         SpinSlider(c, "Parlaklik telafi", self.bright_offset_r, -30, 30,
                     self._on_bright_offset, resolution=1).pack(fill=tk.X, pady=2)
+        ofs_btn = tk.Frame(c, bg=CARD)
+        ofs_btn.pack(fill=tk.X, pady=(4, 0))
+        tk.Button(ofs_btn, text="Telafileri sifirla (0)",
+                  command=self._reset_offsets,
+                  bg=BORDER, fg=FG, font=("Segoe UI", 9),
+                  relief="flat", padx=10, pady=3,
+                  cursor="hand2").pack(side=tk.LEFT)
+        tk.Button(ofs_btn, text="Otomatik esitle",
+                  command=self._auto_match_cameras,
+                  bg="#4a6fa5", fg="white", font=("Segoe UI", 9, "bold"),
+                  relief="flat", padx=10, pady=3,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(6, 0))
+        self.lbl_match = tk.Label(c, text="", bg=CARD, fg=MUTED,
+                                  font=("Segoe UI", 8), justify="left",
+                                  anchor="w")
+        self.lbl_match.pack(fill=tk.X, pady=(2, 0))
 
         # Goruntu
         c = self._section(sf, "Goruntu")
@@ -357,6 +402,20 @@ class CameraApp:
         self.contrast_var = tk.IntVar(value=32)
         self.saturation_var = tk.IntVar(value=64)
         self.sharpness_var = tk.IntVar(value=3)
+        # Gamma: UVC'de x100 olcek, 100 = notr (fabrika varsayilani).
+        #
+        # ONEMLI (2026-08-18 olculdu): Onceki notlarda "SOL kamera 200'un
+        # altini reddediyor, bu yuzden 300 kullanilmali" yaziyordu. BU
+        # TESHIS YANLISTI. Gamma iki kameraya da yazildiginda:
+        #     gamma 300 -> parlaklik 1.18x, kontrast 1.20x  (188/159)
+        #     gamma 100 -> parlaklik 1.04x, kontrast 1.02x  (127/133)
+        # Yani 100 daha dengeli VE hedef parlaklik bandinin (90-150)
+        # ortasinda. Gecmiste 100'de olculen buyuk fark, degerin kotu
+        # olmasindan degil, gamma'nin yalnizca BIR kameraya yazilmasindan
+        # kaynaklaniyordu (_apply_all eskiden gamma yazmiyordu).
+        #
+        # Kural: degerin kendisi degil, IKI KAMERADA AYNI olmasi onemli.
+        self.gamma_var = tk.IntVar(value=100)
         SpinSlider(c, "Parlaklik", self.brightness_var, -64, 64,
                     self._on_img_prop).pack(fill=tk.X, pady=2)
         SpinSlider(c, "Kontrast", self.contrast_var, 0, 100,
@@ -365,12 +424,47 @@ class CameraApp:
                     self._on_img_prop).pack(fill=tk.X, pady=2)
         SpinSlider(c, "Keskinlik", self.sharpness_var, 0, 10,
                     self._on_img_prop).pack(fill=tk.X, pady=2)
+        SpinSlider(c, "Gamma (100=notr)", self.gamma_var, 72, 500,
+                    self._on_img_prop).pack(fill=tk.X, pady=2)
+        tk.Label(c, text="Onemli olan degerin kendisi degil, iki kamerada AYNI "
+                         "olmasi. Olculdu: 100 -> 1.04x, 300 -> 1.18x. "
+                         "Onerilen: 100. Degistirdikten sonra "
+                         "'Ayarlari kameraya yeniden yaz'.",
+                 bg=CARD, fg=MUTED, font=("Segoe UI", 8),
+                 justify="left", anchor="w", wraplength=380).pack(fill=tk.X)
+
+        # Kamera saglik kontrolu
+        c = self._section(sf, "Kamera saglik kontrolu")
+        tk.Label(c, text=(
+            "MSMF'de cap.get() YALAN SOYLER - ne yazarsan yaz sabit deger\n"
+            "doner. Bu yuzden ayarlarin dogru islendigi ancak GORUNTU\n"
+            "olculerek anlasilir. Iki kamera ozdes (olculdu 1.02x), buyuk\n"
+            "fark = bir ayar iki kameraya farkli islenmis demektir."
+        ), bg=CARD, fg=MUTED, font=("Segoe UI", 8),
+                 justify="left").pack(anchor="w", pady=(0, 4))
+        hrow = tk.Frame(c, bg=CARD)
+        hrow.pack(fill=tk.X, pady=2)
+        tk.Button(hrow, text="Ayarlari kameraya yeniden yaz",
+                  command=self._rewrite_all_settings,
+                  bg="#2d6a4f", fg="white", font=("Segoe UI", 9, "bold"),
+                  relief="flat", padx=10, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT)
+        tk.Button(hrow, text="Kontrol et",
+                  command=lambda: self._check_camera_balance(sessiz=False),
+                  bg=BORDER, fg=FG, font=("Segoe UI", 9),
+                  relief="flat", padx=10, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(6, 0))
+        self.lbl_health = tk.Label(c, text="(henuz kontrol edilmedi)",
+                                   bg=CARD, fg=MUTED, font=("Segoe UI", 8),
+                                   justify="left", anchor="w", wraplength=380)
+        self.lbl_health.pack(fill=tk.X, pady=(3, 0))
 
         # Canli degerler
         c = self._section(sf, "Canli degerler")
         self.lbl_fps = self._info_row(c, "FPS")
         self.lbl_net_l = self._info_row(c, "Netlik SOL")
         self.lbl_net_r = self._info_row(c, "Netlik SAG")
+        self.lbl_net_ratio = self._info_row(c, "SOL/SAG orani")
         self.lbl_net_peak_l = self._info_row(c, "Tepe SOL")
         self.lbl_net_peak_r = self._info_row(c, "Tepe SAG")
         self.lbl_bright_l = self._info_row(c, "Parlaklik SOL")
@@ -379,7 +473,7 @@ class CameraApp:
         self.lbl_res_active = self._info_row(c, "Cozunurluk")
         self.lbl_format = self._info_row(c, "Format")
 
-    # ── Tab: Gereksinimler ────────────────────────────
+    # â”€â”€ Tab: Gereksinimler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build_tab_requirements(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Hesaplama  ")
@@ -397,12 +491,20 @@ class CameraApp:
         canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
 
         c = self._section(sf, "Calisma mesafesi")
-        self.z_min_var = tk.IntVar(value=300)
+        # Z min varsayilani 300'du ama sistem numDisparities=256 ile
+        # 399 mm'den yakini OLCEMEZ. Ulasilamaz bir deger icin hesap
+        # yapmak yaniltici; 400'e cekildi ve asagida donanim siniri
+        # ayrica gosteriliyor.
+        self.z_min_var = tk.IntVar(value=400)
         self.z_max_var = tk.IntVar(value=900)
         SpinSlider(c, "Z min (mm)", self.z_min_var, 100, 1000,
                     self._calc_dz).pack(fill=tk.X, pady=2)
         SpinSlider(c, "Z max (mm)", self.z_max_var, 200, 2000,
                     self._calc_dz).pack(fill=tk.X, pady=2)
+        self.lbl_zlimit = tk.Label(c, text="", bg=CARD, fg=MUTED,
+                                   font=("Segoe UI", 8), justify="left",
+                                   anchor="w", wraplength=380)
+        self.lbl_zlimit.pack(fill=tk.X, pady=(2, 0))
 
         c = self._section(sf, "Hedef hassasiyet")
         self.target_var = tk.DoubleVar(value=3.0)
@@ -411,7 +513,9 @@ class CameraApp:
 
         c = self._section(sf, "Sistem parametreleri")
         self.baseline_var = tk.IntVar(value=72)
-        self.fpx_var = tk.IntVar(value=800)
+        # P1[0,0] (rektifiye odak) - K1[0,0]=1292 DEGIL. Kalibrasyon
+        # yuklenince _load_calib_data() bu degeri gercek P1'den gunceller.
+        self.fpx_var = tk.IntVar(value=1420)
         self.dd_var = tk.DoubleVar(value=0.35)
         SpinSlider(c, "Baseline (mm)", self.baseline_var, 10, 300,
                     self._calc_dz).pack(fill=tk.X, pady=2)
@@ -431,8 +535,8 @@ class CameraApp:
             "deltaZ = Z^2 * delta_d / (f_px * B)\n\n"
             "Baseline: kumpasla olc, kalibrasyondan\n"
             "sonra ||T|| ile dogrula.\n\n"
-            "f_px: kalibrasyondan gelecek (K matrisi).\n"
-            "Simdi tahmini deger gir, sonra guncelle.\n\n"
+            "f_px: kalibrasyondan (P1 matrisi).\n"
+            "Kalibrasyon yuklenince otomatik dolar.\n\n"
             "delta_d: eslesme belirsizligi.\n"
             "Tekrarlanabilirlik testinden gelecek (5.3)."
         ), bg=CARD, fg=MUTED, font=("Segoe UI", 9),
@@ -450,6 +554,25 @@ class CameraApp:
         if f <= 0 or b <= 0 or dd <= 0:
             return
 
+        # DONANIM SINIRI: numDisparities kadar disparity aranabilir, daha
+        # yakin cisim arama araligina sigmaz. Olculdu (f=1418.18, B=71.79):
+        #   nd=128 -> 802mm   nd=256 -> 399mm   nd=384 -> 266mm
+        nd = getattr(self, "_num_disp", 256)
+        z_don = f * b / (nd - 1)          # mm (f px, b mm)
+        if hasattr(self, "lbl_zlimit"):
+            if z_min < z_don:
+                self.lbl_zlimit.config(
+                    text=(f"DONANIM SINIRI: numDisparities={nd} ile en yakin "
+                          f"{z_don:.0f} mm olculebilir.\n"
+                          f"Z min={z_min} mm ULASILAMAZ - Derinlik tabindan "
+                          f"arama araligini buyut veya Z min'i yukselt."),
+                    fg=RED)
+            else:
+                self.lbl_zlimit.config(
+                    text=(f"Donanim siniri: numDisparities={nd} -> en yakin "
+                          f"{z_don:.0f} mm. Z min={z_min} mm uygun."),
+                    fg=MUTED)
+
         dz_min = (z_min**2 * dd) / (f * b)
         dz_max = (z_max**2 * dd) / (f * b)
         z_limit = math.sqrt(target * f * b / dd)
@@ -466,7 +589,7 @@ class CameraApp:
         else:
             self.lbl_verdict.config(text="Yetersiz!", fg=RED)
 
-    # ── Tab: Kalibrasyon ──────────────────────────────
+    # â”€â”€ Tab: Kalibrasyon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build_tab_calibration(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Kalibrasyon  ")
@@ -672,15 +795,10 @@ class CameraApp:
         ), bg=CARD, fg=MUTED, font=("Segoe UI", 9),
                  justify="left").pack(fill=tk.X, pady=4)
 
-        def _key_if_not_entry(action):
-            def handler(e):
-                if not isinstance(e.widget, tk.Entry):
-                    action()
-            return handler
-        self.root.bind("<s>", _key_if_not_entry(self._save_frame))
-        self.root.bind("<S>", _key_if_not_entry(self._save_frame))
-        self.root.bind("<c>", _key_if_not_entry(self._toggle_calib))
-        self.root.bind("<C>", _key_if_not_entry(self._toggle_calib))
+        self.root.bind("<s>", self._key_guard(self._save_frame))
+        self.root.bind("<S>", self._key_guard(self._save_frame))
+        self.root.bind("<c>", self._key_guard(self._toggle_calib))
+        self.root.bind("<C>", self._key_guard(self._toggle_calib))
         self.root.bind("<Escape>", lambda e: self._on_close())
 
     def _unlock_board_cfg(self):
@@ -733,10 +851,10 @@ class CameraApp:
         unit = "marker" if btype == "grid" else "kose"
         self._board_info.config(text=f"{btype_label} | {total} {unit}")
 
+        # Board degisti -> pitch yeniden olculmeli, alani acik birak
+        self.sq_locked = False
         self.sq_entry.config(state="normal")
         self.sq_entry.delete(0, tk.END)
-        self.sq_entry.config(state="disabled") if self.sq_locked else None
-        self.sq_locked = False
         self.btn_sq_save.config(state="normal")
         self._update_sq_status()
 
@@ -762,12 +880,12 @@ class CameraApp:
     def _update_sq_status(self):
         val = self.sq_entry.get().strip()
         if not val:
-            self.sq_status.config(text="GIRILMEDI — kumpasla olc", fg=RED)
+            self.sq_status.config(text="GIRILMEDI - kumpasla olc", fg=RED)
         else:
             try:
                 v = float(val)
                 design = self.charuco_cfg["square_length_mm"]
-                if abs(v - design) <= design * 0.5:
+                if abs(v - design) <= design * 0.15:
                     status = f"{v} mm OK" + (" KILITLI" if self.sq_locked else "")
                     self.sq_status.config(text=status, fg=GREEN)
                 else:
@@ -888,7 +1006,7 @@ class CameraApp:
         def run():
             try:
                 result = subprocess.run(
-                    ["python", os.path.join(SCRIPT_DIR, "calibration.py"),
+                    [sys.executable, os.path.join(SCRIPT_DIR, "calibration.py"),
                      "--frames", FRAMES_DIR,
                      "--out", CALIB_PATH],
                     capture_output=True, text=True, cwd=PROJECT_DIR)
@@ -903,13 +1021,24 @@ class CameraApp:
     def _calib_done(self, success, output):
         self.btn_run_calib.config(state="normal")
         if success:
+            # Yeni kalibrasyonu HEMEN bellege al. Aksi halde uygulama
+            # eski kalibrasyonla olcmeye devam eder (sessiz hata).
+            self.calib_data = None
+            self._depth_result = None
+            self._sgbm_cache = {}
+            if self._ensure_calib_current():
+                self.lbl_depth_calib.config(text="HAZIR (yeni)", fg=GREEN)
             try:
                 d = np.load(CALIB_PATH)
                 rms = float(d["rms"])
                 bl = float(d.get("baseline_mm", 0))
-                color = GREEN if rms < 0.4 else YELLOW
+                # calibration.py ile ayni olcekli limit: 0.4 px @ 960 genislik
+                width = int(d["image_size"][0]) if "image_size" in d else 960
+                rms_limit = 0.4 * (width / 960.0)
+                color = GREEN if rms < rms_limit else YELLOW
                 self.lbl_calib_status.config(
-                    text=f"RMS={rms:.4f}px  Baseline={bl:.1f}mm", fg=color)
+                    text=f"RMS={rms:.4f}px (limit {rms_limit:.2f})  Baseline={bl:.1f}mm",
+                    fg=color)
             except Exception:
                 self.lbl_calib_status.config(text="Tamamlandi", fg=GREEN)
         else:
@@ -918,7 +1047,7 @@ class CameraApp:
             self.lbl_calib_status.config(text=f"HATA: {last[:60]}", fg=RED)
         print(output)
 
-    # ── Tab: Derinlik ────────────────────────────────
+    # â”€â”€ Tab: Derinlik â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build_tab_depth(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Derinlik  ")
@@ -937,7 +1066,7 @@ class CameraApp:
                   bg="#2d6a4f", fg="white", font=("Segoe UI", 10, "bold"),
                   relief="flat", padx=14, pady=6, cursor="hand2").pack(side=tk.LEFT, padx=(0, 6))
 
-        tk.Button(btn_row, text="4K Foto Modu", command=self._capture_4k_depth,
+        tk.Button(btn_row, text="Kaliteli Tek Kare [F]", command=self._capture_quality_frame,
                   bg="#6a2d4f", fg="white", font=("Segoe UI", 10, "bold"),
                   relief="flat", padx=14, pady=6, cursor="hand2").pack(side=tk.LEFT)
 
@@ -950,6 +1079,33 @@ class CameraApp:
             selectcolor=BORDER, activebackground=CARD, activeforeground=FG,
             font=("Segoe UI", 9))
         self.btn_clean_disp.pack(side=tk.LEFT)
+
+        # CLAHE varsayilan KAPALI: 6 gercek cift uzerinde olculdu, acikken
+        # derinlik haritasi parcalaniyor (sicrama 0.361 -> 0.419, >2px %1.5 -> %2.1).
+        # Duz yuzeylerde gurultuyu yukselterek sahte doku/sahte eslesme uretiyor.
+        self.clahe_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            btn_row2, text="CLAHE (kontrast art. - harita parcalanir)",
+            variable=self.clahe_var, bg=CARD, fg=FG,
+            selectcolor=BORDER, activebackground=CARD, activeforeground=FG,
+            font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(12, 0))
+
+        # Iki kameranin ton egrileri donanimsal olarak farkli (olculdu:
+        # SOL p5=92/std=38.6, SAG p5=47/std=63.3). Dogrusal mean/std transferi
+        # bu dogrusal-olmayan farki duzeltemez; histogram (CDF) eslemesi duzeltir.
+        # Olcum: ton farki 27.8 -> 1.0, harita sicramasi 0.367 -> 0.249.
+        btn_row3 = tk.Frame(c, bg=CARD)
+        btn_row3.pack(fill=tk.X, pady=2)
+        tk.Label(btn_row3, text="Kamera ton eslemesi:", bg=CARD, fg=FG,
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self.tone_var = tk.StringVar(value="histogram")
+        for deger, etiket in (("histogram", "Histogram (onerilen)"),
+                              ("dogrusal", "Dogrusal"),
+                              ("yok", "Yok")):
+            tk.Radiobutton(btn_row3, text=etiket, variable=self.tone_var,
+                           value=deger, bg=CARD, fg=FG, selectcolor=BORDER,
+                           activebackground=CARD, activeforeground=FG,
+                           font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=3)
 
         c = self._section(tab, "Gorsellestirme")
 
@@ -973,6 +1129,104 @@ class CameraApp:
                            activebackground=CARD, activeforeground=FG,
                            font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=2)
 
+        # Renk olcegi. Varsayilan "otomatik" her karenin kendi maksimumuna gore
+        # olcekler - birkac bozuk piksel maksimumu yukseltince tum sahne koyuya
+        # ezilir ve renkler kareler arasi karsilastirilamaz. "Sabit" secenegi
+        # Hesaplama tabindaki Z_min/Z_max araligini kullanir.
+        # Canli onizleme cozunurlugu. Olculdu (2048x1536):
+        #   1.00 -> 1035 ms   0.75 -> 364 ms   0.50 -> 121 ms   0.35 -> 49 ms
+        # Mesafe sonucu ayni cikiyor; kaybedilen alt-piksel hassasiyeti.
+        # Rektifikasyon HER ZAMAN tam cozunurlukte yapilir, kalibrasyon bozulmaz.
+        # Disparity arama araligi = yakin mesafe sinirini belirler.
+        # Olculdu (f=1418.18 px, B=71.79 mm, 2048x1536):
+        #   nd=128 -> 802mm,  6.2% olu kenar,  529 ms
+        #   nd=256 -> 399mm, 12.5% olu kenar, 1002 ms   (varsayilan)
+        #   nd=384 -> 266mm, 18.8% olu kenar, 1760 ms
+        # Hassasiyeti BOZMAZ (deltaZ = Z^2*dd/(f*B) degismiyor),
+        # sadece yavaslatir ve sol kenarda olu bant buyur.
+        nd_row = tk.Frame(c, bg=CARD)
+        nd_row.pack(fill=tk.X, pady=4)
+        tk.Label(nd_row, text="Arama araligi:", bg=CARD, fg=FG,
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self.numdisp_var = tk.StringVar(value="256")
+        for d, e in (("128", "128 (>80cm)"), ("256", "256 (>40cm)"),
+                     ("384", "384 (>27cm)")):
+            tk.Radiobutton(nd_row, text=e, variable=self.numdisp_var, value=d,
+                           command=self._on_numdisp_change,
+                           bg=CARD, fg=FG, selectcolor=BORDER,
+                           activebackground=CARD, activeforeground=FG,
+                           font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=3)
+        self.lbl_numdisp = tk.Label(c, text="", bg=CARD, fg=MUTED,
+                                    font=("Segoe UI", 8), justify="left",
+                                    anchor="w", wraplength=380)
+        self.lbl_numdisp.pack(fill=tk.X)
+
+        dsc_row = tk.Frame(c, bg=CARD)
+        dsc_row.pack(fill=tk.X, pady=4)
+        tk.Label(dsc_row, text="Canli hiz:", bg=CARD, fg=FG,
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self.dscale_var = tk.StringVar(value="0.5")
+        for d, e in (("1.0", "Tam (yavas)"), ("0.5", "Yari (onerilen)"),
+                     ("0.35", "Hizli")):
+            tk.Radiobutton(dsc_row, text=e, variable=self.dscale_var, value=d,
+                           bg=CARD, fg=FG, selectcolor=BORDER,
+                           activebackground=CARD, activeforeground=FG,
+                           font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=3)
+        tk.Label(c, text=(
+            "Yari/hizli olcek yalnizca ONIZLEME icindir - nisan almak ve\n"
+            "sahneyi gormek icin. Olculdu: kucultme tek bir cekimde 566 mm\n"
+            "yerine 904 mm verdi (%60 sapma), cunku eslesmeyi saglayan ince\n"
+            "yapi kayboluyor. Bu yuzden onizlemedeyken [V] dogrulama\n"
+            "REDDEDILIR; olcum her zaman TAM cozunurluklu [F] ile alinir."),
+                 bg=CARD, fg=MUTED, font=("Segoe UI", 8),
+                 justify="left").pack(anchor="w")
+
+        scale_row = tk.Frame(c, bg=CARD)
+        scale_row.pack(fill=tk.X, pady=4)
+        tk.Label(scale_row, text="Renk olcegi:", bg=CARD, fg=FG,
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self.cscale_var = tk.StringVar(value="sabit")
+        for d, e in (("sabit", "Sabit (Z_min..Z_max) - karsilastirilabilir"),
+                     ("otomatik", "Otomatik (kare bazli)")):
+            tk.Radiobutton(scale_row, text=e, variable=self.cscale_var, value=d,
+                           bg=CARD, fg=FG, selectcolor=BORDER,
+                           activebackground=CARD, activeforeground=FG,
+                           font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=3)
+
+        # Zemin cikarma: masa/zemin duzlemi bilindiginde ona yakin pikseller
+        # maskelenir, geriye yalnizca uzerindeki cisimler kalir.
+        # Duzlem: n·X + d = 0  ->  bir noktanin yuksekligi h = n·X + d
+        zem_row = tk.Frame(c, bg=CARD)
+        zem_row.pack(fill=tk.X, pady=4)
+        self.ground_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(zem_row, text="Zemin/masa cikar",
+                       variable=self.ground_var, bg=CARD, fg=FG,
+                       selectcolor=BORDER, activebackground=CARD,
+                       activeforeground=FG, font=("Segoe UI", 9)
+                       ).pack(side=tk.LEFT)
+        tk.Label(zem_row, text="esik (mm):", bg=CARD, fg=MUTED,
+                 font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(10, 2))
+        self.ground_th_var = tk.IntVar(value=12)
+        tk.Spinbox(zem_row, from_=3, to=100, width=4,
+                   textvariable=self.ground_th_var, bg=INPUT_BG, fg=YELLOW,
+                   font=("Consolas", 9), relief="flat",
+                   buttonbackground=BORDER).pack(side=tk.LEFT)
+        self.ground_clean_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(zem_row, text="maske temizle",
+                       variable=self.ground_clean_var,
+                       bg=CARD, fg=FG, selectcolor=BG,
+                       activebackground=CARD, activeforeground=FG,
+                       font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Button(zem_row, text="Zemin tespit et",
+                  command=self._detect_ground_plane,
+                  bg="#1a5276", fg="white", font=("Segoe UI", 9, "bold"),
+                  relief="flat", padx=10, pady=2,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(10, 0))
+        self.lbl_ground = tk.Label(c, text="", bg=CARD, fg=MUTED,
+                                   font=("Segoe UI", 8), justify="left",
+                                   anchor="w", wraplength=380)
+        self.lbl_ground.pack(fill=tk.X)
+
         viz_row = tk.Frame(c, bg=CARD)
         viz_row.pack(fill=tk.X, pady=4)
         self.contour_var = tk.BooleanVar(value=False)
@@ -988,6 +1242,21 @@ class CameraApp:
                        activeforeground=FG, font=("Segoe UI", 9)
                        ).pack(side=tk.LEFT)
 
+        c = self._section(tab, "Mesafe dogrulama [V]")
+        vrow = tk.Frame(c, bg=CARD)
+        vrow.pack(fill=tk.X, pady=4)
+        tk.Label(vrow, text="Gercek mesafe:", bg=CARD, fg=FG,
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self.verify_entry = tk.Entry(vrow, width=8, font=("Segoe UI", 10),
+                                      bg=BORDER, fg=FG, insertbackground=FG)
+        self.verify_entry.pack(side=tk.LEFT, padx=6)
+        tk.Button(vrow, text="Dogrula [V]", command=self._verify_distance,
+                  bg="#4a6fa5", fg="white", font=("Segoe UI", 9, "bold"),
+                  relief="flat", padx=10, pady=4, cursor="hand2").pack(side=tk.LEFT, padx=4)
+        self.lbl_verify_result = tk.Label(c, text="", bg=CARD, fg=MUTED,
+                                           font=("Consolas", 9), justify="left")
+        self.lbl_verify_result.pack(fill=tk.X, pady=2)
+
         c = self._section(tab, "Bilgi")
         self.lbl_depth_status = self._info_row(c, "Durum")
         self.lbl_depth_center = self._info_row(c, "Merkez mesafe")
@@ -995,7 +1264,7 @@ class CameraApp:
 
         has_calib = os.path.exists(CALIB_PATH)
         self.lbl_depth_calib.config(
-            text="HAZIR" if has_calib else "YOK — once kalibre et",
+            text="HAZIR" if has_calib else "YOK - once kalibre et",
             fg=GREEN if has_calib else RED)
 
         c = self._section(tab, "Renk skalasi")
@@ -1006,10 +1275,17 @@ class CameraApp:
         self.compare_var.trace_add("write", lambda *_: self._update_cmap_desc())
         self._update_cmap_desc()
 
-        self.root.bind("<d>", lambda e: self._save_depth())
-        self.root.bind("<D>", lambda e: self._save_depth())
+        # Entry'ye yazarken tetiklenmemeli (orn. dogrulama alanina "60cm" yazmak)
+        for key, action in (("d", self._save_depth), ("D", self._save_depth),
+                            ("f", self._capture_quality_frame),
+                            ("F", self._capture_quality_frame),
+                            ("v", self._verify_distance),
+                            ("V", self._verify_distance),
+                            ("r", self._reset_click_point),
+                            ("R", self._reset_click_point)):
+            self.root.bind(f"<{key}>", self._key_guard(action))
 
-    # ── Tab: Olcum ───────────────────────────────────
+    # â”€â”€ Tab: Olcum â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build_tab_measure(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Olcum  ")
@@ -1049,19 +1325,18 @@ class CameraApp:
 
         tk.Label(c, text=(
             "Adimlar:\n"
-            "1. Masayi bos birak → B ile arka plan kaydet\n"
+            "1. Masayi bos birak â†’ B ile arka plan kaydet\n"
             "2. Nesneyi masaya koy\n"
             "3. M ile olc\n"
             "Kutu onerisi otomatik gosterilir."
         ), bg=CARD, fg=MUTED, font=("Segoe UI", 9),
                  justify="left").pack(fill=tk.X, pady=4)
 
-        self.root.bind("<b>", lambda e: self._capture_bg())
-        self.root.bind("<B>", lambda e: self._capture_bg())
-        self.root.bind("<m>", lambda e: self._do_measure())
-        self.root.bind("<M>", lambda e: self._do_measure())
+        for key, action in (("b", self._capture_bg), ("B", self._capture_bg),
+                            ("m", self._do_measure), ("M", self._do_measure)):
+            self.root.bind(f"<{key}>", self._key_guard(action))
 
-    # ── Tab: Durum ───────────────────────────────────
+    # â”€â”€ Tab: Durum â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build_tab_status(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Durum  ")
@@ -1132,7 +1407,7 @@ class CameraApp:
         self._refresh_status()
         self._refresh_diary()
 
-    # ── Tab: Rehber ───────────────────────────────────
+    # â”€â”€ Tab: Rehber â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _build_tab_guide(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Rehber  ")
@@ -1154,12 +1429,13 @@ class CameraApp:
              "Ayarlar tabinda cozunurluk sec.\n"
              "Onerilen: 1280x720 YUY2 (6 FPS)\n"
              "Kalibrasyon ve olcum AYNI cozunurlukle\n"
-             "yapilmali — sonra degistirme.\n"
-             "4K (0.7 FPS) cok yavas, 640x480 az detay."),
+             "yapilmali - sonra degistirme.\n"
+             "640x480 az detay, 2048x1536 onerilen.\n"
+             "Kaliteli Tek Kare [F] ile sabit cekim."),
 
             ("ADIM 2: Aydinlatma sabitle", YELLOW,
              "Masa lambasi kullan, perdeyi kapat.\n"
-             "Gun isigi degisir — kalibrasyon bozulur.\n"
+             "Gun isigi degisir - kalibrasyon bozulur.\n"
              "Floresan/LED: pozlamayi 10ms katlarina\n"
              "ayarla (50 Hz bantlanma onlemi)."),
 
@@ -1200,12 +1476,12 @@ class CameraApp:
 
             ("ADIM 6: Baseline olc", GREEN,
              "Kumpasla iki lens merkezi arasindaki\n"
-             "mesafeyi olc → yaklasik baseline.\n\n"
+             "mesafeyi olc â†’ yaklasik baseline.\n\n"
              "Bu degeri Hesaplama tabindaki\n"
              "'Baseline' alanina gir.\n\n"
              "Gercek baseline kalibrasyondan gelecek\n"
              "(||T|| vektoru). Kumpas olcumuyle\n"
-             "karsilastir — %5'ten fazla fark varsa\n"
+             "karsilastir - %5'ten fazla fark varsa\n"
              "kalibrasyonda sorun var demek."),
 
             ("ADIM 7: Kalibrasyon karesi topla", GREEN,
@@ -1215,16 +1491,50 @@ class CameraApp:
              "4. 25-40 gecerli cift topla\n"
              "5. 3x3 grid kapsama + egim + mesafe\n\n"
              "Her iki kamerada da desen gorunmeli.\n"
-             "Hareket bulanikliginden kacin —\n"
+             "Hareket bulanikliginden kacin -\n"
              "dur, bekle, kaydet."),
 
             ("ADIM 8: Kalibre et", GREEN,
              "Kareler toplandiktan sonra\n"
              "calibration.py scriptini calistir.\n"
-             "(Henuz yazilmadi — bu adimda\n"
+             "(Henuz yazilmadi - bu adimda\n"
              "Claude Code'a sor.)\n\n"
              "Hedef: RMS < 0.4 px\n"
              "Cikti: calibration/calib_result.npz"),
+
+            ("KAMERALAR DENGESIZ GORUNUYORSA", RED,
+             "Belirti: iki goruntunun parlakligi/rengi\n"
+             "belirgin farkli, derinlik haritasi bozuk.\n\n"
+             "NEDEN: Kameralar ayarlari HAFIZASINDA\n"
+             "saklÄ±yor. Bir ozellik yazilmazsa eski\n"
+             "degeri kalir ve iki kamerada farkli olur.\n"
+             "MSMF geri okumasi bozuk oldugu icin bu\n"
+             "fark cap.get() ile GORULEMEZ - sadece\n"
+             "goruntu olculerek anlasilir.\n\n"
+             "COZUM (tek adim):\n"
+             "Ayarlar tabi > 'Ayarlari kameraya\n"
+             "yeniden yaz' butonu. Tum ozellikleri\n"
+             "iki kameraya da yazar ve olcerek\n"
+             "dogrular.\n\n"
+             "Uygulama 30 sn'de bir kendiliginden\n"
+             "kontrol eder; dengesizlik olursa durum\n"
+             "cubugunda kirmizi uyari cikar.\n\n"
+             "Olculen normal deger: parlaklik 1.02x,\n"
+             "kontrast 1.09x. Iki kamera ozdestir -\n"
+             "buyuk fark her zaman AYAR sorunudur,\n"
+             "donanim degil."),
+
+            ("KISAYOLLAR", ACCENT,
+             "[F] Kaliteli Tek Kare yakala / birak\n"
+             "[V] Mesafe dogrulama\n"
+             "[D] Derinlik ekran goruntusu kaydet\n"
+             "[R] Olcum noktasini merkeze sifirla\n\n"
+             "TIKLAMA ILE OLCUM:\n"
+             "Derinlik modunda veya kaliteli karede\n"
+             "sol goruntuye TIKLA â†’ o noktanin\n"
+             "mesafesini olcer. Cismin UZERINDE\n"
+             "tiklaman lazim, arka plana tiklanirsa\n"
+             "duvar/zemin mesafesini olcer."),
         ]
 
         for title, color, text in steps:
@@ -1237,21 +1547,15 @@ class CameraApp:
                      font=("Segoe UI", 9), justify="left",
                      anchor="nw").pack(fill=tk.X, pady=(4, 0))
 
-    # ── Kamera ────────────────────────────────────────
+    # â”€â”€ Kamera â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _open_cameras(self):
         self.status_bar.config(text="Kameralar baglaniyor (MSMF)...", fg=YELLOW)
         self.root.update()
         threading.Thread(target=self._open_cameras_bg, daemon=True).start()
 
     def _open_cameras_bg(self):
-        results = [None, None]
-        def _open(idx, slot):
-            results[slot] = cv2.VideoCapture(idx, cv2.CAP_MSMF)
-        t_l = threading.Thread(target=_open, args=(self.left_idx, 0))
-        t_r = threading.Thread(target=_open, args=(self.right_idx, 1))
-        t_l.start(); t_r.start()
-        t_l.join(); t_r.join()
-        cap_l, cap_r = results
+        cap_l = cv2.VideoCapture(self.left_idx, cv2.CAP_MSMF)
+        cap_r = cv2.VideoCapture(self.right_idx, cv2.CAP_MSMF)
         self.cap_l = cap_l
         self.cap_r = cap_r
 
@@ -1286,24 +1590,115 @@ class CameraApp:
         self.root.after(0, self._apply_all)
         self.running = True
         self.root.after(0, lambda: self.status_bar.config(
-            text="Kameralar bagli — {} MSMF".format(sel), fg=ACCENT))
+            text="Kameralar bagli - {} MSMF".format(sel), fg=ACCENT))
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
+        # MSMF'de akis baslamadan yazilan property'ler sessizce yok sayilabilir.
+        # Ilk kareler aktiktan sonra ayarlari TEKRAR uygula - aksi halde hangi
+        # kamera once hazir olursa ayari o alir, digeri almaz ve iki kamera
+        # farkli parlaklikta kalir.
+        self.root.after(1200, self._apply_all)
+        self.root.after(2500, self._apply_all)
+        self.root.after(3200, self._periodic_health_check)
         self._update_display()
 
+    def _periodic_health_check(self):
+        """30 sn'de bir sessiz saglik kontrolu - bozulma kendiliginden yakalansin.
+
+        Ayarlar kamerada kalici saklandigi ve MSMF ile okunamadigi icin
+        (bkz. _check_camera_balance) tek guvenilir izleme yolu goruntuyu
+        surekli olcmektir.
+        """
+        if not self.running:
+            return
+        try:
+            self._check_camera_balance(sessiz=True)
+        except Exception:
+            pass
+        self.root.after(30000, self._periodic_health_check)
+
+    def _check_camera_balance(self, sessiz=True):
+        """Kamera saglik kontrolu - GORUNTUYU olcer, cap.get() KULLANMAZ.
+
+        MSMF'de cap.get() yalan soyler (ne yazarsan yaz sabit deger doner),
+        bu yuzden ayarlarin dogru uygulandigi ancak gercek kareyi olcerek
+        anlasilabilir. Iki kamera ozdes oldugu icin (olculdu: 1.02x)
+        buyuk fark = bir ayar iki kameraya farkli islenmis demektir.
+        """
+        with self.lock:
+            fl, fr = self.frame_l, self.frame_r
+        if fl is None or fr is None:
+            if not sessiz:
+                self.lbl_health.config(text="Kare alinamadi", fg=YELLOW)
+            return None
+        gl = cv2.cvtColor(fl, cv2.COLOR_BGR2GRAY)
+        gr = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
+        bl, br = float(gl.mean()), float(gr.mean())
+        sl, sr = float(gl.std()), float(gr.std())
+        p_oran = max(bl, br) / max(min(bl, br), 1)
+        k_oran = max(sl, sr) / max(min(sl, sr), 1)
+
+        if p_oran < 1.15 and k_oran < 1.25:
+            msg = (f"SAGLIKLI - parlaklik {p_oran:.2f}x  kontrast {k_oran:.2f}x"
+                   f"  (SOL {bl:.0f}/{sl:.0f}  SAG {br:.0f}/{sr:.0f})")
+            renk = GREEN
+        elif p_oran < 1.35 and k_oran < 1.5:
+            msg = (f"SINIRDA - parlaklik {p_oran:.2f}x  kontrast {k_oran:.2f}x"
+                   f"  ('Ayarlari kameraya yeniden yaz' dene)")
+            renk = YELLOW
+        else:
+            msg = (f"DENGESIZ - parlaklik {p_oran:.2f}x  kontrast {k_oran:.2f}x"
+                   f"  (SOL {bl:.0f} / SAG {br:.0f})  ->  yeniden yaz!")
+            renk = RED
+        if hasattr(self, "lbl_health"):
+            self.lbl_health.config(text=msg, fg=renk)
+        if renk is RED and sessiz:
+            self.status_bar.config(
+                text=f"  UYARI: kameralar dengesiz (parlaklik {p_oran:.2f}x) "
+                     f"- Ayarlar tabindan 'Ayarlari kameraya yeniden yaz'",
+                fg=RED)
+        return p_oran, k_oran
+
+    def _rewrite_all_settings(self):
+        """Tum ayarlari iki kameraya da yeniden yaz, sonra olcerek dogrula.
+
+        Bu, 'ayar bozuldu' sikayetinin tek adimli cozumu. Ozellikle
+        GAMMA/HUE/BACKLIGHT kamerada kalici saklandigi ve MSMF ile
+        okunamadigi icin duzenli olarak yeniden yazilmalari gerekir.
+        """
+        self.lbl_health.config(text="Yaziliyor...", fg=YELLOW)
+        self.root.update()
+        self._apply_all()
+        # MSMF ilk yazimi yutabiliyor -> akis ilerledikten sonra tekrar
+        self.root.after(900, self._apply_all)
+        self.root.after(1800, self._apply_all)
+        self.root.after(2600, lambda: self._check_camera_balance(sessiz=False))
+
     def _apply_all(self):
+        """Tum ayarlari uygula. SAG kamera telafileri de DAHIL -
+        eskiden burada iki kameraya ayni deger yaziliyordu ve
+        telafiler acilista sessizce yok sayiliyordu."""
+        # TUM ozellikler yazilmali. Eskiden GAMMA/HUE/BACKLIGHT yazilmiyordu;
+        # bu ozellikler kamerada KALICI saklandigi ve MSMF geri okumasi bozuk
+        # oldugu icin iki kamerada farkli kalip gorunmez bir dengesizlik
+        # yaratiyordu (olculdu: gamma 200 vs 100 -> 2.7x parlaklik farki).
+        # Hepsi esitlendiginde kameralar 1.02x ile ozdes cikti.
         for cap in [self.cap_l, self.cap_r]:
             if not cap or not cap.isOpened():
                 continue
             cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-            cap.set(cv2.CAP_PROP_EXPOSURE, self.exposure_var.get())
             cap.set(cv2.CAP_PROP_AUTO_WB, 0)
             cap.set(cv2.CAP_PROP_WB_TEMPERATURE, self.wb_var.get())
-            cap.set(cv2.CAP_PROP_GAIN, self.gain_var.get())
-            cap.set(cv2.CAP_PROP_BRIGHTNESS, self.brightness_var.get())
             cap.set(cv2.CAP_PROP_CONTRAST, self.contrast_var.get())
             cap.set(cv2.CAP_PROP_SATURATION, self.saturation_var.get())
             cap.set(cv2.CAP_PROP_SHARPNESS, self.sharpness_var.get())
+            cap.set(cv2.CAP_PROP_GAMMA, self.gamma_var.get())
+            cap.set(cv2.CAP_PROP_HUE, 0)
+            cap.set(cv2.CAP_PROP_BACKLIGHT, 0)
+        # Telafili ayarlar (sag = sol + telafi)
+        self._on_exposure()
+        self._on_gain()
+        self._on_bright_offset()
 
     def _set_prop(self, prop, val):
         for cap in [self.cap_l, self.cap_r]:
@@ -1333,6 +1728,77 @@ class CameraApp:
         self._set_prop(cv2.CAP_PROP_AUTO_WB, 0)
         self._set_prop(cv2.CAP_PROP_WB_TEMPERATURE, self.wb_var.get())
 
+    def _auto_match_cameras(self):
+        """SAG kamerayi SOL'a esitleyen gain telafisini olcerek bul.
+
+        Iki kameranin parlaklik farki sahne/isiga gore degisir ama bir oturum
+        icinde kararlidir (olculdu: fark +46.1, 30 sn'de salinim 0.3).
+        Bu yuzden sabit deger gomulmez, ihtiyac oldukca burada olculur.
+        """
+        if not (self.cap_l and self.cap_l.isOpened()
+                and self.cap_r and self.cap_r.isOpened()):
+            self.lbl_match.config(text="Iki kamera da acik olmali!", fg=RED)
+            return
+        self.lbl_match.config(text="Olculuyor, sahneyi sabit tut...", fg=YELLOW)
+        self.root.update()
+
+        def parlaklik():
+            vals = []
+            for _ in range(6):
+                with self.lock:
+                    a, b = self.frame_l, self.frame_r
+                if a is not None and b is not None:
+                    vals.append((float(cv2.cvtColor(a, cv2.COLOR_BGR2GRAY).mean()),
+                                 float(cv2.cvtColor(b, cv2.COLOR_BGR2GRAY).mean())))
+                time.sleep(0.08)
+            if not vals:
+                return None, None
+            arr = np.array(vals)
+            return float(arr[:, 0].mean()), float(arr[:, 1].mean())
+
+        def calis():
+            try:
+                eski = self.gain_offset_r.get()
+                l0, r0 = parlaklik()
+                if l0 is None:
+                    self.root.after(0, lambda: self.lbl_match.config(
+                        text="Kare alinamadi", fg=RED))
+                    return
+                en_iyi, en_iyi_fark, sonuc = eski, abs(r0 - l0), []
+                for g in range(0, 61, 5):
+                    self.root.after(0, lambda v=g: self.gain_offset_r.set(v))
+                    time.sleep(0.45)
+                    l, r = parlaklik()
+                    if l is None:
+                        continue
+                    sonuc.append((g, r - l))
+                    if abs(r - l) < en_iyi_fark:
+                        en_iyi, en_iyi_fark = g, abs(r - l)
+                self.root.after(0, lambda: self.gain_offset_r.set(en_iyi))
+                time.sleep(0.4)
+                l, r = parlaklik()
+                msg = (f"Gain telafi = +{en_iyi}  |  SOL {l:.0f} / SAG {r:.0f} "
+                       f"(fark {r-l:+.0f})")
+                renk = GREEN if abs(r - l) < 8 else YELLOW
+                if abs(r - l) >= 8:
+                    msg += "  - fark buyuk, ton eslemesi 'Histogram' kalsin"
+                self.root.after(0, lambda: self.lbl_match.config(text=msg, fg=renk))
+            except Exception as ex:
+                self.root.after(0, lambda: self.lbl_match.config(
+                    text=f"Hata: {ex}", fg=RED))
+
+        threading.Thread(target=calis, daemon=True).start()
+
+    def _reset_offsets(self):
+        """Uc SAG kamera telafisini de 0'a al ve kameralara uygula."""
+        self.exp_offset_r.set(0)
+        self.gain_offset_r.set(0)
+        self.bright_offset_r.set(0)
+        self._on_exposure()
+        self._on_gain()
+        self._on_bright_offset()
+        self.status_bar.config(text="  SAG kamera telafileri sifirlandi", fg=GREEN)
+
     def _on_bright_offset(self):
         val = self.brightness_var.get()
         if self.cap_l and self.cap_l.isOpened():
@@ -1342,10 +1808,13 @@ class CameraApp:
                            max(-64, min(64, val + self.bright_offset_r.get())))
 
     def _on_img_prop(self):
-        self._set_prop(cv2.CAP_PROP_BRIGHTNESS, self.brightness_var.get())
+        # Parlakligi _on_bright_offset uzerinden uygula - dogrudan
+        # _set_prop kullanilirsa SAG kameranin parlaklik telafisi silinir
+        self._on_bright_offset()
         self._set_prop(cv2.CAP_PROP_CONTRAST, self.contrast_var.get())
         self._set_prop(cv2.CAP_PROP_SATURATION, self.saturation_var.get())
         self._set_prop(cv2.CAP_PROP_SHARPNESS, self.sharpness_var.get())
+        self._set_prop(cv2.CAP_PROP_GAMMA, self.gamma_var.get())
 
     def _on_resolution_change(self, event=None):
         sel = self.res_var.get()
@@ -1353,7 +1822,7 @@ class CameraApp:
             if name == sel:
                 if w >= 3840:
                     self.status_bar.config(
-                        text="4K canli kullanima uygun degil (~1fps). 4K Foto Modu butonunu kullanin.",
+                        text="4K canli kullanima uygun degil (~1fps). Kaliteli Tek Kare [F] butonunu kullanin.",
                         fg=YELLOW)
                     prev = f"{self.current_w}x{self.current_h}"
                     for rn, rw, rh, rf in RESOLUTIONS:
@@ -1362,23 +1831,22 @@ class CameraApp:
                             break
                     return
                 self.running = False
-                if self.thread is not None:
-                    self.thread.join(timeout=2.0)
+                time.sleep(0.15)
                 for cap in [self.cap_l, self.cap_r]:
-                    if cap and cap.isOpened():
-                        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fmt))
-                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                    if not cap or not cap.isOpened():
+                        continue
+                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fmt))
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
                 self.current_w = w
                 self.current_h = h
                 self._apply_all()
                 self.running = True
                 self.thread = threading.Thread(target=self._capture_loop, daemon=True)
                 self.thread.start()
-                self._update_display()
                 break
 
-    # ── Capture ───────────────────────────────────────
+    # â”€â”€ Capture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _try_reconnect(self, side):
         sel = self.res_var.get()
         w, h, fmt = self.current_w, self.current_h, "YUY2"
@@ -1456,24 +1924,28 @@ class CameraApp:
                 time.sleep(0.2)
                 continue
 
+            gray_l = cv2.cvtColor(fl, cv2.COLOR_BGR2GRAY)
+            gray_r = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
+
             if not hasattr(self, '_metric_skip'):
                 self._metric_skip = 0
             self._metric_skip += 1
-            skip_n = 10 if self.current_w >= 2048 else 3
-            if self._metric_skip % skip_n == 0:
-                small_l = cv2.cvtColor(cv2.resize(fl, (640, 480)), cv2.COLOR_BGR2GRAY)
-                small_r = cv2.cvtColor(cv2.resize(fr, (640, 480)), cv2.COLOR_BGR2GRAY)
-                sl = cv2.Laplacian(small_l, cv2.CV_64F).var()
-                sr = cv2.Laplacian(small_r, cv2.CV_64F).var()
-                bl = float(small_l.mean())
-                br = float(small_r.mean())
+            if self._metric_skip % 5 == 0:
+                # Netlik: merkez %60 ROI uzerinden - odak_test.py ile AYNI olcum.
+                # Tum kare uzerinden olcmek duz zemin/duvari da sayar ve
+                # skoru sahneye gore 1.5-2x dusurur, iki arac karsilastirilamaz.
+                mh, mw = gray_l.shape
+                y1, y2 = int(mh * 0.2), int(mh * 0.8)
+                x1, x2 = int(mw * 0.2), int(mw * 0.8)
+                sl = cv2.Laplacian(gray_l[y1:y2, x1:x2], cv2.CV_64F).var()
+                sr = cv2.Laplacian(gray_r[y1:y2, x1:x2], cv2.CV_64F).var()
+                bl = float(gray_l.mean())
+                br = float(gray_r.mean())
             else:
                 sl = getattr(self, 'score_l', 0)
                 sr = getattr(self, 'score_r', 0)
                 bl = getattr(self, 'bright_l', 0)
                 br = getattr(self, 'bright_r', 0)
-
-            cl = cr = 0
 
             if self.calib_mode:
                 dl = fl.copy()
@@ -1481,6 +1953,7 @@ class CameraApp:
             else:
                 dl = fl
                 dr = fr
+            cl = cr = 0
 
             if self.calib_mode:
                 if not hasattr(self, '_detect_skip'):
@@ -1488,30 +1961,16 @@ class CameraApp:
                     self._last_detect_l = (None, None)
                     self._last_detect_r = (None, None)
                 self._detect_skip += 1
-                run_detect = (self._detect_skip % 5 == 0)
+                run_detect = (self._detect_skip % 3 == 0)
                 is_grid = isinstance(self.detector, cv2.aruco.ArucoDetector)
 
                 if run_detect:
-                    if self.current_w > 1280:
-                        det_scale = 960.0 / fl.shape[0]
-                        det_w = int(fl.shape[1] * det_scale)
-                        det_l = cv2.cvtColor(cv2.resize(fl, (det_w, 960)), cv2.COLOR_BGR2GRAY)
-                        det_r = cv2.cvtColor(cv2.resize(fr, (det_w, 960)), cv2.COLOR_BGR2GRAY)
-                        inv_scale = 1.0 / det_scale
-                    else:
-                        det_l = cv2.cvtColor(fl, cv2.COLOR_BGR2GRAY)
-                        det_r = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
-                        inv_scale = 1.0
                     try:
                         if is_grid:
-                            corners_l, ids_l, _ = self.detector.detectMarkers(det_l)
-                            if corners_l and inv_scale != 1.0:
-                                corners_l = tuple(c * inv_scale for c in corners_l)
+                            corners_l, ids_l, _ = self.detector.detectMarkers(gray_l)
                             self._last_detect_l = (corners_l, ids_l)
                         else:
-                            ch_corners_l, ch_ids_l, _, _ = self.detector.detectBoard(det_l)
-                            if ch_corners_l is not None and inv_scale != 1.0:
-                                ch_corners_l = ch_corners_l * inv_scale
+                            ch_corners_l, ch_ids_l, _, _ = self.detector.detectBoard(gray_l)
                             self._last_detect_l = (ch_corners_l, ch_ids_l)
                     except Exception as e:
                         if not hasattr(self, '_dbg_err'):
@@ -1519,14 +1978,10 @@ class CameraApp:
                             print(f"[DEBUG] SOL HATA: {e}")
                     try:
                         if is_grid:
-                            corners_r, ids_r, _ = self.detector.detectMarkers(det_r)
-                            if corners_r and inv_scale != 1.0:
-                                corners_r = tuple(c * inv_scale for c in corners_r)
+                            corners_r, ids_r, _ = self.detector.detectMarkers(gray_r)
                             self._last_detect_r = (corners_r, ids_r)
                         else:
-                            ch_corners_r, ch_ids_r, _, _ = self.detector.detectBoard(det_r)
-                            if ch_corners_r is not None and inv_scale != 1.0:
-                                ch_corners_r = ch_corners_r * inv_scale
+                            ch_corners_r, ch_ids_r, _, _ = self.detector.detectBoard(gray_r)
                             self._last_detect_r = (ch_corners_r, ch_ids_r)
                     except Exception as e:
                         if not hasattr(self, '_dbg_err_r'):
@@ -1583,7 +2038,54 @@ class CameraApp:
                 frame_count = 0
                 prev_time = now
 
-    # ── Display ───────────────────────────────────────
+    # â”€â”€ Display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    def _on_cam_click(self, event):
+        """Sol goruntuye tiklaninca o noktayi olcum noktasi yap."""
+        if not self.depth_mode and not getattr(self, '_quality_frozen', False):
+            return
+        s = self._display_scale
+        fl_w = self._display_fl_w
+        if s <= 0 or fl_w <= 0:
+            return
+        img_x = int(event.x / s)
+        img_y = int(event.y / s)
+        if img_x >= fl_w:
+            return
+        self._click_point = (img_y, img_x)
+        if getattr(self, '_quality_frozen', False) and self._current_dsp is not None:
+            dsp = self._current_dsp
+            h, w = dsp.shape
+            cy, cx = self._click_point
+            cy = max(25, min(cy, h - 25))
+            cx = max(25, min(cx, w - 25))
+            roi_half = 15
+            y1, y2 = cy - roi_half, cy + roi_half
+            x1, x2 = cx - roi_half, cx + roi_half
+            roi = dsp[y1:y2, x1:x2]
+            valid = roi[roi > 0]
+            if len(valid) > 10 and self.calib_data is not None:
+                pts = cv2.reprojectImageTo3D(dsp, self.calib_data["Q"])
+                roi_z = np.abs(pts[y1:y2, x1:x2, 2][roi > 0]) * 1000
+                cz = float(np.median(roi_z))
+                overlay = self._quality_rect_l.copy() if hasattr(self, '_quality_rect_l') else self._quality_overlay.copy()
+                d_norm = self._normalize_disp(dsp)
+                cmap_id = self.colormap_map.get(self.colormap_var.get(), cv2.COLORMAP_JET)
+                dc = cv2.applyColorMap(d_norm, cmap_id)
+                dc[dsp <= 0] = [0, 0, 0]
+                mask = dsp > 0
+                overlay[mask] = cv2.addWeighted(overlay, 0.4, dc, 0.6, 0)[mask]
+                cv2.line(overlay, (cx - 20, cy), (cx + 20, cy), (0, 255, 0), 2)
+                cv2.line(overlay, (cx, cy - 20), (cx, cy + 20), (0, 255, 0), 2)
+                if 0 < cz < 5000:
+                    cv2.putText(overlay, f"{cz:.0f} mm", (cx + 25, cy - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    self.lbl_depth_center.config(text=f"{cz:.0f} mm (tiklanilan nokta)")
+                self._quality_overlay = overlay.copy()
+
+    def _reset_click_point(self):
+        self._click_point = None
+        self.lbl_depth_center.config(text="Merkez (sifirlandÄ±)")
+
     def _update_display(self):
         if not self.running:
             return
@@ -1608,31 +2110,28 @@ class CameraApp:
                 th = min(h1, h2)
                 fl = cv2.resize(fl, (int(w1*th/h1), th))
                 fr = cv2.resize(fr, (int(w2*th/h2), th))
+            # Kaliteli kare sonucu dondurulmussa onu goster
+            if getattr(self, '_quality_frozen', False) and hasattr(self, '_quality_overlay'):
+                qo = self._quality_overlay
+                qd = self._quality_depth
+                h_q, w_q = qo.shape[:2]
+                h_fl, w_fl = fl.shape[:2]
+                if (h_q, w_q) != (h_fl, w_fl):
+                    qo = cv2.resize(qo, (w_fl, h_fl))
+                    qd = cv2.resize(qd, (w_fl, h_fl))
+                fl = qo
+                fr = qd
             # Derinlik modu aktifse sol goruntuye overlay ekle
-            if self.depth_mode and self.map1x is not None and self.stereo is not None:
+            elif self.depth_mode and self.map1x is not None and self.stereo is not None:
                 try:
-                    with self.lock:
-                        raw_l = self.frame_l
-                        raw_r = self.frame_r
-                    if raw_l is not None and raw_r is not None:
-                        if self._use_gpu:
-                            gpu_src_l = cv2.cuda_GpuMat(); gpu_src_l.upload(raw_l)
-                            gpu_src_r = cv2.cuda_GpuMat(); gpu_src_r.upload(raw_r)
-                            gpu_rl = cv2.cuda.remap(gpu_src_l, self.gpu_map1x, self.gpu_map1y, cv2.INTER_LINEAR)
-                            gpu_rr = cv2.cuda.remap(gpu_src_r, self.gpu_map2x, self.gpu_map2y, cv2.INTER_LINEAR)
-                            rl = gpu_rl.download()
-                            gpu_gl = cv2.cuda.cvtColor(gpu_rl, cv2.COLOR_BGR2GRAY)
-                            gpu_gr = cv2.cuda.cvtColor(gpu_rr, cv2.COLOR_BGR2GRAY)
-                            gl = gpu_gl.download()
-                            gr = gpu_gr.download()
-                        else:
-                            rl = cv2.remap(raw_l, self.map1x, self.map1y, cv2.INTER_LINEAR)
-                            rr = cv2.remap(raw_r, self.map2x, self.map2y, cv2.INTER_LINEAR)
-                            gl = cv2.cvtColor(rl, cv2.COLOR_BGR2GRAY)
-                            gr = cv2.cvtColor(rr, cv2.COLOR_BGR2GRAY)
-                        dsp = self._compute_disparity(gl, gr)
-                        dm = dsp.max() if dsp.max() > 0 else 1
-                        dn = (dsp / dm * 255).astype(np.uint8)
+                    # Derinlik AYRI THREAD'de hesaplanir; burada sadece hazir
+                    # sonuc okunur. Eskiden hesap bu satirda senkron yapiliyordu
+                    # ve arayuzu her karede ~920 ms donduruyordu (olculdu).
+                    with self._depth_lock:
+                        hazir = self._depth_result
+                    if hazir is not None:
+                        rl, dsp, gl = hazir
+                        dn = self._normalize_disp(dsp)
                         cmap_id = self.colormap_map.get(
                             self.colormap_var.get(), cv2.COLORMAP_JET)
                         dc = cv2.applyColorMap(dn, cmap_id)
@@ -1647,16 +2146,8 @@ class CameraApp:
                         msk = dsp > 0
                         fl = rl.copy()
                         fl[msk] = cv2.addWeighted(rl, 0.4, dc, 0.6, 0)[msk]
-                        if self.compare_var.get():
-                            if self._use_gpu:
-                                g_l = cv2.cuda_GpuMat()
-                                g_r = cv2.cuda_GpuMat()
-                                g_l.upload(gl)
-                                g_r.upload(gr)
-                                dsp_raw = self.stereo.compute(g_l, g_r).download().astype(np.float32) / 16.0
-                            else:
-                                dsp_raw = self.stereo.compute(gl, gr).astype(np.float32) / 16.0
-                            dsp_raw[dsp_raw <= 0] = 0
+                        if self.compare_var.get() and self._raw_disp is not None:
+                            dsp_raw = self._raw_disp
                             common_max = max(dsp.max(), dsp_raw.max(), 1)
                             dn_r = (dsp_raw / common_max * 255).astype(np.uint8)
                             dn_c = (dsp / common_max * 255).astype(np.uint8)
@@ -1677,30 +2168,69 @@ class CameraApp:
                             disp_gray = cv2.cvtColor(dn, cv2.COLOR_GRAY2BGR)
                             disp_gray[dsp <= 0] = [0, 0, 0]
                             fr = disp_gray
-                        # Merkez mesafe
-                        cy, cx = rl.shape[0]//2, rl.shape[1]//2
-                        # Nisan isareti (crosshair) — her iki goruntuye
+                        self._current_dsp = dsp.copy()
+                        # Olcum noktasi: tiklanmissa orasi, yoksa merkez
+                        if self._click_point is not None:
+                            cy, cx = self._click_point
+                            cy = max(25, min(cy, rl.shape[0] - 25))
+                            cx = max(25, min(cx, rl.shape[1] - 25))
+                        else:
+                            cy, cx = rl.shape[0]//2, rl.shape[1]//2
                         cross_size = 20
                         cv2.line(fl, (cx - cross_size, cy), (cx + cross_size, cy), (0, 255, 0), 2)
                         cv2.line(fl, (cx, cy - cross_size), (cx, cy + cross_size), (0, 255, 0), 2)
                         cv2.line(fr, (cx - cross_size, cy), (cx + cross_size, cy), (0, 255, 0), 2)
                         cv2.line(fr, (cx, cy - cross_size), (cx, cy + cross_size), (0, 255, 0), 2)
                         # Etiketler
-                        cv2.putText(fl, "Sol kamera + derinlik", (10, 25),
+                        label_txt = "Sol kamera + derinlik (tikla=olc)"
+                        cv2.putText(fl, label_txt, (10, 25),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
                         cv2.putText(fr, "Disparity map", (10, 25),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-                        cd = dsp[cy, cx]
-                        if cd > 0:
-                            pts = cv2.reprojectImageTo3D(dsp, self.calib_data["Q"])
-                            cz = abs(pts[cy, cx, 2]) * 1000
-                            if 0 < cz < 5000:
-                                cv2.putText(fl, f"{cz:.0f}mm", (cx + 25, cy - 10),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                                cv2.putText(fr, f"{cz:.0f}mm", (cx + 25, cy - 10),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                                self.root.after(0, lambda z=cz: self.lbl_depth_center.config(
-                                    text=f"{z:.0f} mm", fg=GREEN))
+                        dsp_olc = getattr(self, "_depth_olcum", None)
+                        if dsp_olc is None or dsp_olc.shape != dsp.shape:
+                            dsp_olc = dsp
+                        cz, etiket, renk = self._measure_point(
+                            dsp_olc, gl, cy, cx)
+                        # Nokta zemin olarak silindiyse mesafe yine dogru,
+                        # olculen sey masa yuzeyidir - bunu belirt.
+                        if (dsp_olc is not dsp and cz is not None
+                                and dsp[cy, cx] <= 0):
+                            etiket += " (ZEMIN)"
+                        # Dusuk cozunurluklu onizleme OLCUM DEGILDIR.
+                        # Olculdu: 0.5 olcekte tek bir cekimde 566 -> 904 mm
+                        # (%59.8 sapma). Kucultme ince yapiyi yok edip
+                        # eslesmeyi kaydiriyor. Bu yuzden onizleme degeri
+                        # olcum defterine YAZILAMAZ; V tusu reddeder.
+                        try:
+                            _onizleme = float(self.dscale_var.get()) < 0.999
+                        except Exception:
+                            _onizleme = True
+                        if _onizleme:
+                            etiket = "ONIZLEME (olcum icin F)"
+                            renk = YELLOW
+                        # Guvenilmez veya onizleme -> deftere yazilmaz
+                        self._last_center_mm = (cz if (renk is GREEN
+                                                       and not _onizleme)
+                                                else None)
+                        self._last_quality = etiket
+                        if cz is not None and 0 < cz < 5000:
+                            bgr = {GREEN: (0, 255, 0), YELLOW: (0, 200, 255),
+                                   RED: (0, 80, 255)}.get(renk, (0, 255, 0))
+                            cv2.putText(fl, f"{cz:.0f}mm", (cx + 25, cy - 10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, bgr, 2)
+                            if renk is not GREEN:
+                                cv2.putText(fl, etiket, (cx + 25, cy + 18),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, bgr, 2)
+                            cv2.putText(fr, f"{cz:.0f}mm", (cx + 25, cy - 10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, bgr, 2)
+                            self.root.after(0, lambda z=cz, e=etiket, r=renk:
+                                            self.lbl_depth_center.config(
+                                                text=f"{z:.0f} mm - {e}", fg=r))
+                        else:
+                            self.root.after(0, lambda e=etiket, r=renk:
+                                            self.lbl_depth_center.config(
+                                                text=e, fg=r))
                 except Exception:
                     pass
 
@@ -1712,12 +2242,14 @@ class CameraApp:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
                 cv2.putText(fr, f"SAG (idx {self.right_idx})", (10, h_fr - 15),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            self._display_fl_w = fl.shape[1]
             combined = np.hstack([fl, fr])
 
             mw = max(self.cam_label.winfo_width(), 100)
             mh = max(self.cam_label.winfo_height(), 100)
             ch, cw = combined.shape[:2]
             scale = min(mw/cw, mh/ch, 1.0)
+            self._display_scale = scale
             if scale < 1.0:
                 combined = cv2.resize(combined, (int(cw*scale), int(ch*scale)))
 
@@ -1728,17 +2260,43 @@ class CameraApp:
 
         # Status bar
         fourcc_int = int(self.cap_l.get(cv2.CAP_PROP_FOURCC)) if self.cap_l else 0
-        fmt = "".join([chr((fourcc_int >> 8*j) & 0xFF) for j in range(4)]) if fourcc_int else "?"
-        exp = self.cap_l.get(cv2.CAP_PROP_EXPOSURE) if self.cap_l else 0
-        gpu_tag = "GPU" if self._use_gpu else "CPU"
-        st = (f"  {self.current_w}x{self.current_h} {fmt} [{gpu_tag}]   "
+        # FOURCC'ten gelen karakterler her zaman yazdirilabilir DEGIL. Kamera
+        # bozuk/eksik kod dondurunce icine NUL karakteri giriyor ve Tk etiketi
+        # metni ORADA KESIYOR - durum cubugunda cozunurlukten sonrasi
+        # (FPS, parlaklik, netlik, poz) tamamen kayboluyordu.
+        fmt = "?"
+        if fourcc_int:
+            ham = [chr((fourcc_int >> 8 * j) & 0xFF) for j in range(4)]
+            temiz = "".join(ch for ch in ham if 32 <= ord(ch) < 127).strip()
+            fmt = temiz if temiz else f"0x{fourcc_int:08X}"
+        # MSMF'de CAP_PROP_EXPOSURE geri okumasi BOZUK - yazilan deger ne olursa
+        # olsun sabit (-6) donuyor, oysa pozlama gercekte uygulaniyor. Bu yuzden
+        # kameradan okumak yerine bizim yazdigimiz degeri gosteriyoruz.
+        exp = self.exposure_var.get()
+        gain = self.gain_var.get()
+        st = (f"  {self.current_w}x{self.current_h} {fmt}   "
               f"FPS: {fps:.1f}   "
+              f"Parlaklik: L={bl:.0f} R={br:.0f}   "
               f"Netlik: L={sl:.0f} R={sr:.0f}   "
-              f"Poz: {exp:.0f}   "
+              f"Poz: {exp:.0f}  Gain: {gain:.0f}   "
               f"Kayit: {self.save_count}")
         if self.calib_mode:
             st += f"   Kose: L={cl}/{self.max_corners} R={cr}/{self.max_corners}"
-        self.status_bar.config(text=st)
+        # Doyma uyarisi: olculdu -> poz=-2'de iki kamera da ~245'e cikiyor
+        # (std 9). Doymus pikselde doku kalmaz, SGBM eslesme uretemez.
+        # Kullanilabilir bant -5 ... -3.
+        renk = FG
+        if max(bl, br) > 235:
+            st += "   DOYMUS - pozlamayi dusur (-4)"
+            renk = RED
+        elif max(bl, br) > 210:
+            st += "   parlak - doymaya yakin"
+            renk = YELLOW
+        elif min(bl, br) < 40:
+            st += "   cok karanlik - pozlamayi artir"
+            renk = YELLOW
+        st = "".join(ch if ch.isprintable() else " " for ch in st)
+        self.status_bar.config(text=st, fg=renk)
 
         # Ayarlar tab canli
         self.lbl_fps.config(text=f"{fps:.1f}",
@@ -1749,6 +2307,13 @@ class CameraApp:
                                fg=GREEN if sr > 100 else YELLOW if sr > 30 else RED)
         self.lbl_net_peak_l.config(text=f"{pl:.0f}", fg=MUTED)
         self.lbl_net_peak_r.config(text=f"{pr:.0f}", fg=MUTED)
+        # Iki kamera arasi netlik dengesi. Kalibrasyon karelerinde olculen
+        # normal aralik: 0.81 - 2.23 (ortalama 1.26)
+        if sr > 0:
+            ratio = sl / sr
+            self.lbl_net_ratio.config(
+                text=f"{ratio:.2f}",
+                fg=GREEN if 0.7 <= ratio <= 1.5 else YELLOW if 0.5 <= ratio <= 2.3 else RED)
 
         bright_ok = lambda b: GREEN if 90 <= b <= 130 else YELLOW if 50 <= b <= 180 else RED
         self.lbl_bright_l.config(text=f"{bl:.0f}/255", fg=bright_ok(bl))
@@ -1773,7 +2338,7 @@ class CameraApp:
 
         self.root.after(33, self._update_display)
 
-    # ── Actions ───────────────────────────────────────
+    # â”€â”€ Actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _toggle_auto_capture(self):
         self.auto_capture = not self.auto_capture
         if self.auto_capture:
@@ -1833,7 +2398,7 @@ class CameraApp:
         self.save_count -= 1
         self.lbl_saved.config(text=f"{self.save_count} cift")
 
-    # ── Swap kamera ────────────────────────────────────
+    # â”€â”€ Swap kamera â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _swap_cameras(self):
         self.running = False
         time.sleep(0.2)
@@ -1844,7 +2409,7 @@ class CameraApp:
         self.lbl_cam_idx.config(text=f"SOL=idx {self.left_idx}  SAG=idx {self.right_idx}")
         self._open_cameras()
 
-    # ── Ayar kaydet/yukle ────────────────────────────
+    # â”€â”€ Ayar kaydet/yukle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _save_settings(self):
         settings = {
             "exposure": self.exposure_var.get(),
@@ -1857,6 +2422,7 @@ class CameraApp:
             "contrast": self.contrast_var.get(),
             "saturation": self.saturation_var.get(),
             "sharpness": self.sharpness_var.get(),
+            "gamma": self.gamma_var.get(),
             "resolution": self.res_var.get(),
             "left_idx": self.left_idx,
             "right_idx": self.right_idx,
@@ -1884,22 +2450,63 @@ class CameraApp:
         self.exposure_var.set(s.get("exposure", -4))
         self.gain_var.set(s.get("gain", 0))
         self.wb_var.set(s.get("wb", 4500))
-        self.exp_offset_r.set(s.get("exp_offset_r", 1))
+        self.exp_offset_r.set(s.get("exp_offset_r", 0))
         self.gain_offset_r.set(s.get("gain_offset_r", 0))
         self.bright_offset_r.set(s.get("bright_offset_r", 0))
         self.brightness_var.set(s.get("brightness", 0))
         self.contrast_var.set(s.get("contrast", 32))
         self.saturation_var.set(s.get("saturation", 64))
         self.sharpness_var.set(s.get("sharpness", 3))
+        self.gamma_var.set(int(s.get("gamma", 100)))
         res = s.get("resolution", RESOLUTIONS[6][0])
         self.res_var.set(res)
         self._pending_settings = None
 
-    # ── Derinlik ─────────────────────────────────────
+    # â”€â”€ Derinlik â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    def _load_ground_data(self):
+        """Zemin duzlemini yukle; dosya degistiyse yeniden oku.
+
+        Kalibrasyonla ayni mantik: zemin tespiti yeniden yapildiginda
+        uygulama eski duzlemi kullanmaya devam etmemeli.
+        """
+        if not os.path.exists(GROUND_PATH):
+            self.ground_data = None
+            return False
+        t = os.path.getmtime(GROUND_PATH)
+        if (self.ground_data is None
+                or t != getattr(self, "_ground_mtime", None)):
+            self._ground_mtime = t
+            # np.load NPZ dosyasini ACIK TUTAR. Windows'ta acik tutulan
+            # dosyanin uzerine np.savez yazamaz -> ikinci kez zemin
+            # tespiti yapmak PermissionError verirdi. Icerigi bellege
+            # kopyalayip dosyayi kapatiyoruz.
+            with np.load(GROUND_PATH) as z:
+                self.ground_data = {k: z[k] for k in z.files}
+        return True
+
+    def _ensure_calib_current(self):
+        """Kalibrasyon dosyasi degistiyse BELLEGE yeniden yukle.
+
+        Eskiden yalnizca 'calib_data is None' kontrolu vardi; bir kez
+        yuklendikten sonra bir daha okunmuyordu. Uygulama acikken yeniden
+        kalibre edilirse bellekteki ESKI kalibrasyon kullanilmaya devam
+        ediyordu - mesafeler sessizce yanlis cikardi.
+        """
+        if not os.path.exists(CALIB_PATH):
+            return self.calib_data is not None
+        t = os.path.getmtime(CALIB_PATH)
+        if self.calib_data is None or t != getattr(self, "_calib_mtime", None):
+            return self._load_calib_data()
+        return True
+
     def _load_calib_data(self):
         if not os.path.exists(CALIB_PATH):
             return False
-        self.calib_data = np.load(CALIB_PATH)
+        self._calib_mtime = os.path.getmtime(CALIB_PATH)
+        # Zemin dosyasiyla ayni gerekce: npz'yi acik birakma, yoksa
+        # uygulama acikken yeniden kalibrasyon dosyayi yazamaz.
+        with np.load(CALIB_PATH) as z:
+            self.calib_data = {k: z[k] for k in z.files}
         K1, D1 = self.calib_data["K1"], self.calib_data["D1"]
         K2, D2 = self.calib_data["K2"], self.calib_data["D2"]
         R1, R2 = self.calib_data["R1"], self.calib_data["R2"]
@@ -1909,58 +2516,507 @@ class CameraApp:
             K1, D1, R1, P1, image_size, cv2.CV_32FC1)
         self.map2x, self.map2y = cv2.initUndistortRectifyMap(
             K2, D2, R2, P2, image_size, cv2.CV_32FC1)
-        if self._use_gpu:
-            self.gpu_map1x = cv2.cuda_GpuMat(); self.gpu_map1x.upload(self.map1x)
-            self.gpu_map1y = cv2.cuda_GpuMat(); self.gpu_map1y.upload(self.map1y)
-            self.gpu_map2x = cv2.cuda_GpuMat(); self.gpu_map2x.upload(self.map2x)
-            self.gpu_map2y = cv2.cuda_GpuMat(); self.gpu_map2y.upload(self.map2y)
-            self.stereo = cv2.cuda.createStereoSGM(
-                minDisparity=0, numDisparities=256, P1=10, P2=120,
-                uniquenessRatio=15, mode=0)
-            self.stereo_r = None
-            self.wls_filter = None
-        else:
-            self.stereo = cv2.StereoSGBM_create(
-                minDisparity=0, numDisparities=256, blockSize=5,
-                P1=8*3*49, P2=32*3*49, disp12MaxDiff=1,
-                uniquenessRatio=15, speckleWindowSize=200, speckleRange=2,
-                preFilterCap=63, mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
-            self.stereo_r = cv2.ximgproc.createRightMatcher(self.stereo)
-            self.wls_filter = cv2.ximgproc.createDisparityWLSFilter(self.stereo)
-            self.wls_filter.setLambda(8000)
-            self.wls_filter.setSigmaColor(1.5)
+        self.stereo = cv2.StereoSGBM_create(
+            minDisparity=0, numDisparities=256, blockSize=7,
+            P1=8*3*49, P2=32*3*49, disp12MaxDiff=1,
+            # uniquenessRatio 15 = eski (72cc70a) deger. 10'a dusurulmustu;
+            # daha gevsek = dokusuz bolgelerde belirsiz eslesmeleri kabul eder.
+            uniquenessRatio=15, speckleWindowSize=200, speckleRange=2,
+            preFilterCap=63, mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
+        self.stereo_r = cv2.ximgproc.createRightMatcher(self.stereo)
+        self.wls_filter = cv2.ximgproc.createDisparityWLSFilter(self.stereo)
+        self.wls_filter.setLambda(8000)
+        self.wls_filter.setSigmaColor(1.5)
         self.hires_stereo = None
-        if os.path.exists(GROUND_PATH):
-            self.ground_data = np.load(GROUND_PATH)
+        self._dsp_history = []
+        self._load_ground_data()
+        try:
+            f_px = int(round(P1[0, 0]))
+            T = self.calib_data["T"]
+            baseline_mm = int(round(np.linalg.norm(T) * 1000))
+            self.fpx_var.set(f_px)
+            self.baseline_var.set(baseline_mm)
+            self._calc_dz()
+        except Exception:
+            pass
         return True
 
-    def _compute_disparity(self, gray_l, gray_r):
-        """Disparity hesapla — GPU StereoSGM + post-process, veya CPU SGBM + WLS."""
-        if self._use_gpu:
-            gpu_l = cv2.cuda_GpuMat()
-            gpu_r = cv2.cuda_GpuMat()
-            gpu_l.upload(gray_l)
-            gpu_r.upload(gray_r)
-            dsp = self.stereo.compute(gpu_l, gpu_r).download().astype(np.float32) / 16.0
-            dsp[dsp <= 0] = 0
-            dsp = cv2.medianBlur(dsp, 5)
-        else:
-            dsp_l = self.stereo.compute(gray_l, gray_r)
-            dsp_r = self.stereo_r.compute(gray_r, gray_l)
-            dsp = self.wls_filter.filter(dsp_l, gray_l, disparity_map_right=dsp_r)
-            dsp = dsp.astype(np.float32) / 16.0
-            dsp[dsp <= 0] = 0
+    @staticmethod
+    def _tone_match(gray_l, gray_r, yontem):
+        """SAG goruntuyu SOL'un ton dagilimina oturt.
+
+        histogram: CDF eslemesi - dogrusal olmayan ton egrisi farkini da duzeltir
+        dogrusal : mean/std transferi - sadece olcek+kaydirma
+        """
+        if yontem == "histogram":
+            hl = np.bincount(gray_l.ravel(), minlength=256).astype(np.float64)
+            hr = np.bincount(gray_r.ravel(), minlength=256).astype(np.float64)
+            if hl.sum() == 0 or hr.sum() == 0:
+                return gray_r
+            cdf_l = np.cumsum(hl) / hl.sum()
+            cdf_r = np.cumsum(hr) / hr.sum()
+            lut = np.interp(cdf_r, cdf_l, np.arange(256)).astype(np.uint8)
+            return lut[gray_r]
+        if yontem == "dogrusal":
+            mu_l, sig_l = gray_l.mean(), max(gray_l.std(), 1)
+            mu_r, sig_r = gray_r.mean(), max(gray_r.std(), 1)
+            return np.clip((gray_r.astype(np.float32) - mu_r) * (sig_l / sig_r)
+                           + mu_l, 0, 255).astype(np.uint8)
+        return gray_r
+
+    def _normalize_disp(self, dsp):
+        """Disparity -> 0-255 gri. Sabit modda olcek Z_min/Z_max'ten gelir,
+        boylece ayni renk her karede ayni mesafeyi gosterir."""
+        mod = self.cscale_var.get() if hasattr(self, "cscale_var") else "otomatik"
+        if mod == "sabit" and self.calib_data is not None:
+            try:
+                f_px = float(self.calib_data["P1"][0, 0])
+                b_m = float(np.linalg.norm(self.calib_data["T"]))
+                z_min = max(self.z_min_var.get(), 1) / 1000.0
+                z_max = max(self.z_max_var.get(), z_min * 1000 + 1) / 1000.0
+                d_hi = f_px * b_m / z_min      # yakin -> buyuk disparity
+                d_lo = f_px * b_m / z_max      # uzak  -> kucuk disparity
+                if d_hi > d_lo:
+                    n = (dsp - d_lo) / (d_hi - d_lo) * 255.0
+                    return np.clip(n, 0, 255).astype(np.uint8)
+            except Exception:
+                pass
+        dm = dsp.max() if dsp.max() > 0 else 1
+        return (dsp / dm * 255).astype(np.uint8)
+
+    def _on_numdisp_change(self):
+        """Arama araligi degisti - SGBM onbellegini bosalt, sinirlari guncelle."""
+        try:
+            nd = int(self.numdisp_var.get())
+        except (ValueError, AttributeError):
+            return
+        self._num_disp = nd
+        self._sgbm_cache = {}          # yeni araligla yeniden kurulacak
+        self._depth_result = None
+        if self.calib_data is not None:
+            f = float(self.calib_data["P1"][0, 0])
+            b = float(np.linalg.norm(self.calib_data["T"])) * 1000
+            z = f * b / (nd - 1)
+            olu = nd / max(self.current_w, 1) * 100
+            self.lbl_numdisp.config(
+                text=(f"En yakin olculebilir: {z:.0f} mm  |  "
+                      f"sol kenarda olu bant %{olu:.1f}  |  "
+                      f"hiz ~{nd/256:.1f}x yavas"),
+                fg=MUTED)
+        self._calc_dz()
+
+    def _sgbm_for_scale(self, olcek):
+        """Olcege uygun SGBM+WLS uretir ve onbellekler.
+
+        numDisparities de olcekle kucultulmeli: yari cozunurlukte gercek
+        disparity de yariya iner, 256'lik arama gereksiz ve yavas olur.
+        (Olculdu: olcek 0.5 + numDisp 128 -> 121 ms, tam cozunurluk 1035 ms;
+        mesafe sonucu birebir ayni.)
+        """
+        anahtar = round(olcek, 2)
+        onbellek = getattr(self, "_sgbm_cache", None)
+        if onbellek is None:
+            onbellek = self._sgbm_cache = {}
+        if anahtar in onbellek:
+            return onbellek[anahtar]
+        taban = getattr(self, "_num_disp", 256)
+        nd = max(16, int(round(taban * olcek / 16)) * 16)
+        bs = 7 if olcek > 0.6 else 5
+        st = cv2.StereoSGBM_create(
+            minDisparity=0, numDisparities=nd, blockSize=bs,
+            P1=8*3*bs*bs, P2=32*3*bs*bs, disp12MaxDiff=1,
+            uniquenessRatio=15, speckleWindowSize=200, speckleRange=2,
+            preFilterCap=63, mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
+        rm = cv2.ximgproc.createRightMatcher(st)
+        wl = cv2.ximgproc.createDisparityWLSFilter(st)
+        wl.setLambda(8000)
+        wl.setSigmaColor(1.5)
+        onbellek[anahtar] = (st, rm, wl)
+        return onbellek[anahtar]
+
+    def _compute_disparity(self, gray_l, gray_r, olcek=1.0):
+        """WLS filtreli disparity hesapla ve post-processing uygula.
+
+        Dondurulen disparity GIRDI olceginde olur; tam cozunurluk karsiligina
+        cevirmek cagiranin sorumlulugundadir (bkz. _depth_worker)."""
+        # CLAHE opsiyonel - varsayilan kapali (duz yuzeylerde gurultuyu
+        # yukseltip sahte eslesme uretiyor, olculdu).
+        if getattr(self, "clahe_var", None) is not None and self.clahe_var.get():
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            gray_l = clahe.apply(gray_l)
+            gray_r = clahe.apply(gray_r)
+        yontem = self.tone_var.get() if hasattr(self, "tone_var") else "histogram"
+        gray_r = self._tone_match(gray_l, gray_r, yontem)
+        gray_l = cv2.GaussianBlur(gray_l, (3, 3), 0)
+        gray_r = cv2.GaussianBlur(gray_r, (3, 3), 0)
+        stereo, right_m, wls = self._sgbm_for_scale(olcek)
+        dsp_l = stereo.compute(gray_l, gray_r)
+        dsp_r = right_m.compute(gray_r, gray_l)
+        # GERCEK eslesen pikseller - WLS doldurmadan ONCE. Guvenilirlik
+        # degerlendirmesi bunu kullanir; WLS sonrasi maske her yeri dolu
+        # gosterdigi icin kalite olcusu olarak KULLANILAMAZ.
+        self._last_raw_mask = (dsp_l > 0)
+        dsp = wls.filter(dsp_l, gray_l, disparity_map_right=dsp_r)
+        dsp = dsp.astype(np.float32) / 16.0
+        dsp[dsp <= 0] = 0
         if hasattr(self, 'clean_disp_var') and self.clean_disp_var.get():
             dsp = self._clean_disparity(dsp)
+        if hasattr(self, '_dsp_history'):
+            self._dsp_history.append(dsp.copy())
+            if len(self._dsp_history) > 5:
+                self._dsp_history.pop(0)
+            if len(self._dsp_history) >= 2:
+                stack = np.stack(self._dsp_history, axis=0)
+                dsp = np.median(stack, axis=0).astype(np.float32)
         return dsp
+
+    def _depth_worker(self):
+        """Derinligi AYRI THREAD'de hesapla - arayuz hic donmesin.
+
+        Olculdu: tam cozunurlukte bir derinlik karesi 920 ms suruyor
+        (SGBM sol 346 + SGBM sag 396 + WLS 100 + digerleri). Bu is eskiden
+        _update_display icinde, yani ana thread'de yapiliyordu; arayuz her
+        karede ~920 ms doniyordu. FPS sayaci yakalama thread'ini olctugu
+        icin sorun gostergede gorunmuyordu.
+
+        COZUNURLUK MANTIGI (kalibrasyonu bozmaz):
+          remap TAM cozunurlukte yapilir - kalibrasyon (K,D,R,P) yalnizca
+          orada kullanilir. Rektifiye cift kucultulunce epipolar hizalama
+          korunur (satirlar esit olceklenir). SGBM kucuk goruntude calisir,
+          sonra disparity haritasi tam cozunurluge buyutulup degerleri
+          1/olcek ile CARPILIR. Boylece asagi akista (mesafe, guvenilirlik,
+          renklendirme) hicbir sey degismez.
+          Bedeli: alt-piksel hassasiyeti olcek kadar duser -> yalnizca
+          CANLI ONIZLEME icin. Olcumler tam cozunurluklu 'Kaliteli Kare'den.
+        """
+        while self.running:
+            try:
+                if (not self.depth_mode or self._quality_frozen
+                        or self.map1x is None or self.stereo is None):
+                    time.sleep(0.08)
+                    continue
+                with self.lock:
+                    raw_l, raw_r = self.frame_l, self.frame_r
+                if raw_l is None or raw_r is None:
+                    time.sleep(0.05)
+                    continue
+
+                # 1) Rektifikasyon - TAM cozunurlukte (kalibrasyon burada)
+                rl = cv2.remap(raw_l, self.map1x, self.map1y, cv2.INTER_LINEAR)
+                rr = cv2.remap(raw_r, self.map2x, self.map2y, cv2.INTER_LINEAR)
+                gl = cv2.cvtColor(rl, cv2.COLOR_BGR2GRAY)
+                gr = cv2.cvtColor(rr, cv2.COLOR_BGR2GRAY)
+
+                try:
+                    olcek = float(self.dscale_var.get())
+                except Exception:
+                    olcek = 0.5
+                olcek = min(max(olcek, 0.25), 1.0)
+
+                if olcek < 0.999:
+                    h0, w0 = gl.shape
+                    gl_s = cv2.resize(gl, None, fx=olcek, fy=olcek,
+                                      interpolation=cv2.INTER_AREA)
+                    gr_s = cv2.resize(gr, None, fx=olcek, fy=olcek,
+                                      interpolation=cv2.INTER_AREA)
+                    dsp_s = self._compute_disparity(gl_s, gr_s, olcek)
+                    # 2) Tam cozunurluge geri: hem BOYUT hem DEGER olceklenir
+                    dsp = cv2.resize(dsp_s, (w0, h0),
+                                     interpolation=cv2.INTER_NEAREST) / olcek
+                    if self._last_raw_mask is not None:
+                        self._last_raw_mask = cv2.resize(
+                            self._last_raw_mask.astype(np.uint8), (w0, h0),
+                            interpolation=cv2.INTER_NEAREST).astype(bool)
+                else:
+                    dsp = self._compute_disparity(gl, gr, 1.0)
+
+                if self.compare_var.get():
+                    ham = self.stereo.compute(gl, gr).astype(np.float32) / 16.0
+                    ham[ham <= 0] = 0
+                    self._raw_disp = ham
+                else:
+                    self._raw_disp = None
+
+                # Cikarma oncesi harita OLCUM icin saklanir; silinen
+                # pikseller eslesme hatasi degil, kasten atilmis zemindir.
+                dsp_olcum = dsp
+                if self.ground_var.get():
+                    if self._load_ground_data():
+                        dsp_olcum = dsp.copy()
+                        dsp = self._remove_ground(dsp)
+                    else:
+                        self.root.after(0, lambda: self.lbl_ground.config(
+                            text="Zemin duzlemi YOK - Derinlik tabi > "
+                                 "'Zemin tespit et'e bas", fg=RED))
+
+                with self._depth_lock:
+                    self._depth_result = (rl, dsp, gl)
+                    self._depth_olcum = dsp_olcum
+            except Exception:
+                time.sleep(0.15)
+
+    def _remove_ground(self, dsp):
+        """Zemin/masa duzlemine yakin pikselleri maskele.
+
+        ground_plane.npz icinde duzlem normali n ve d katsayisi var:
+            n·X + d = 0
+        Bir 3B nokta X icin duzleme dik uzaklik  h = n·X + d  (metre).
+        Masa yuzeyi h≈0'dir; uzerindeki cisimler h>0. Esigin altindaki
+        ve duzlemin ALTINDAKI (h<0, gurultu/yansima) pikseller atilir.
+
+        Not: n ve d, ZEMIN TESPITI yapilan andaki kamera pozuna goredir.
+        Kamera veya masa hareket ederse zemin tespiti tekrarlanmalidir.
+        """
+        g = self.ground_data
+        if g is None or self.calib_data is None:
+            return dsp
+        try:
+            n = np.asarray(g["normal"], dtype=np.float64).ravel()
+            d = float(g["d"])
+            # Duzlem HAM kamera cercevesinde kaydedildiyse (eski
+            # ground_plane.py ciktisi) REKTIFIYE cerceveye dondur.
+            # reprojectImageTo3D noktalari rektifiye cercevededir; ikisi
+            # R1 kadar farkli (bu kalibrasyonda 1.57 derece) ve bu, masa
+            # uzerinde 200 mm yanda ~5 mm yukseklik hatasi demek.
+            cerceve = str(g["frame"]) if "frame" in g else "raw"
+            if cerceve != "rectified":
+                R1 = np.asarray(self.calib_data["R1"], dtype=np.float64)
+                n = R1 @ n          # d degismez: donme mesafeyi korur
+            n = n / max(float(np.linalg.norm(n)), 1e-9)
+            pts = cv2.reprojectImageTo3D(dsp, self.calib_data["Q"])
+            h = pts @ n + d              # metre
+            esik = max(self.ground_th_var.get(), 1) / 1000.0
+            cisim = (dsp > 0) & (h >= esik)
+            if self.ground_clean_var.get():
+                cisim = self._clean_object_mask(cisim)
+            out = dsp.copy()
+            out[~cisim] = 0
+            kalan = float((out > 0).sum()) / max(out.size, 1) * 100
+            self.root.after(0, lambda k=kalan: self.lbl_ground.config(
+                text=f"Zemin cikarildi — kalan piksel %{k:.1f}",
+                fg=GREEN if k > 1 else YELLOW))
+            return out
+        except Exception as ex:
+            self.root.after(0, lambda e=ex: self.lbl_ground.config(
+                text=f"Zemin cikarilamadi: {e}", fg=RED))
+            return dsp
+
+    def _detect_ground_plane(self):
+        """Zemin/masa duzlemini UYGULAMA ICINDE tespit et ve kaydet.
+
+        Neden ayri script degil: ground_plane.py'yi Durum tabindan
+        baslatmak calismiyordu - uygulama kameralari zaten aciktir,
+        ikinci surec ayni cihazi acamaz.
+
+        Neden REKTIFIYE goruntu: duzlem, derinlik noktalariyla AYNI
+        koordinat cercevesinde olmak zorunda. reprojectImageTo3D ciktisi
+        rektifiye sol kamera cercevesindedir; ham goruntude solvePnP ise
+        HAM cerceveyi verir. Ikisi R1 kadar (bu kalibrasyonda 1.57 derece)
+        farkli - masa uzerinde 200 mm yanda ~5 mm yukseklik hatasi demek.
+        Rektifiye goruntude intrinsik P1[:3,:3], distorsiyon ise sifirdir
+        (remap zaten gidermistir).
+        """
+        if not self._ensure_calib_current():
+            self.lbl_ground.config(text="Once kalibrasyon gerekli.", fg=RED)
+            return
+        if self.board is None or self.detector is None:
+            self.lbl_ground.config(text="Desen tanimi yuklenemedi.", fg=RED)
+            return
+
+        # Sensor gurultusunu azaltmak icin birkac kare ortala.
+        yiginlar = []
+        for _ in range(8):
+            fl = self.frame_l
+            if fl is not None:
+                yiginlar.append(cv2.cvtColor(fl, cv2.COLOR_BGR2GRAY))
+            time.sleep(0.04)
+        if not yiginlar:
+            self.lbl_ground.config(text="Kamera karesi yok.", fg=RED)
+            return
+        gray = np.mean(np.stack(yiginlar), axis=0).astype(np.uint8)
+
+        # Rektifiye et - duzlem derinlikle ayni cercevede cikacak.
+        gray = cv2.remap(gray, self.map1x, self.map1y, cv2.INTER_LINEAR)
+        K = np.asarray(self.calib_data["P1"], dtype=np.float64)[:3, :3]
+        D = np.zeros(5, dtype=np.float64)
+
+        try:
+            if isinstance(self.detector, cv2.aruco.ArucoDetector):
+                corners, ids, _ = self.detector.detectMarkers(gray)
+                if ids is None or len(ids) < 6:
+                    n = 0 if ids is None else len(ids)
+                    self.lbl_ground.config(
+                        text=f"Desen bulunamadi ({n} isaret). Tahtayi "
+                             "masaya duz koy, isigi artir.", fg=RED)
+                    return
+                obj_pts, img_pts = self.board.matchImagePoints(corners, ids)
+                n_kose = len(ids)
+            else:
+                cc, ci, _, _ = self.detector.detectBoard(gray)
+                if cc is None or len(cc) < 12:
+                    n = 0 if cc is None else len(cc)
+                    self.lbl_ground.config(
+                        text=f"Desen bulunamadi ({n} kose, en az 12 gerek). "
+                             "Tahtayi masaya duz koy, isigi artir.", fg=RED)
+                    return
+                obj_pts, img_pts = self.board.matchImagePoints(cc, ci)
+                n_kose = len(cc)
+
+            ok, rvec, tvec = cv2.solvePnP(
+                obj_pts, img_pts, K, D, flags=cv2.SOLVEPNP_ITERATIVE)
+            if not ok:
+                self.lbl_ground.config(text="Poz cozulemedi.", fg=RED)
+                return
+
+            R_mat, _ = cv2.Rodrigues(rvec)
+            normal = R_mat[:, 2].astype(np.float64)
+            if normal[2] > 0:            # normal kameraya baksin
+                normal = -normal
+            d = float(-np.dot(normal, tvec.ravel()))
+            aci = float(np.degrees(np.arccos(min(abs(normal[2]), 1.0))))
+            mesafe = abs(d) * 1000.0
+
+            # ACI BIR HATA OLCUTU DEGIL. Kamera masaya egik baktiginda
+            # duzlem normali ile optik eksen arasindaki aci dogal olarak
+            # 40-50 derece cikar; tahta yine de masaya tam duz yatiyordur.
+            # Gecerliligin gercek olcutu, cozulen pozun kose noktalarini
+            # ne kadar iyi acikladigidir: yeniden izdusum hatasi.
+            yeniden, _ = cv2.projectPoints(obj_pts, rvec, tvec, K, D)
+            rms = float(np.sqrt(np.mean(np.sum(
+                (yeniden.reshape(-1, 2) - img_pts.reshape(-1, 2)) ** 2,
+                axis=1))))
+            if rms > 2.0:
+                self.lbl_ground.config(
+                    text=f"Duzlem uyumsuz (izdusum hatasi {rms:.2f} px). "
+                         "Tahta bukuk/kalkik olabilir, isigi artir.", fg=RED)
+                return
+
+            np.savez(GROUND_PATH,
+                     normal=normal, d=d,
+                     K=K, D=D,
+                     frame="rectified",          # KRITIK: cerceve etiketi
+                     n_corners=n_kose, rms_px=rms, aci_derece=aci,
+                     tarih=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+            self.ground_data = None              # yeniden okunmaya zorla
+            self._load_ground_data()
+            self.ground_var.set(True)
+            uyari = "  (cok siyirtma acisi, hassasiyet dusuk)" if aci > 70 else ""
+            self.lbl_ground.config(
+                text=f"Zemin kaydedildi: {n_kose} kose, izdusum {rms:.2f} px, "
+                     f"bakis acisi {aci:.1f} derece, duzlem {mesafe:.0f} mm. "
+                     f"Cikarma acildi.{uyari}",
+                fg=YELLOW if aci > 70 else GREEN)
+        except Exception as ex:
+            self.lbl_ground.config(text=f"Zemin tespiti hatasi: {ex}", fg=RED)
+
+    @staticmethod
+    def _clean_object_mask(mask, min_alan=1500, kapama=9):
+        """Zemin cikarildiktan sonra kalan cisim maskesini toparla.
+
+        Neden: cismin dokusuz yuzeylerinde gercek eslesme yoktur, WLS
+        oralari cevreden TAHMIN ederek doldurur. Tahmin degeri duzleme
+        yakin duserse piksel yanlislikla 'zemin' sayilip silinir - cisim
+        delik deliksiz cikar. Uc adim:
+          1) CLOSE : cisim icindeki ince catlaklari kapatir
+          2) OPEN  : masadan kalan tek tuk benekleri atar
+          3) delik doldurma: goruntu kenarina degmeyen kucuk bosluklar
+             cismin ici demektir, doldurulur
+        """
+        m = mask.astype(np.uint8)
+        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (kapama, kapama)))
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (5, 5)))
+        n, lab, st, _ = cv2.connectedComponentsWithStats(m, 8)
+        for i in range(1, n):
+            if st[i, cv2.CC_STAT_AREA] < min_alan:
+                m[lab == i] = 0
+        inv = (m == 0).astype(np.uint8)
+        n2, lab2, st2, _ = cv2.connectedComponentsWithStats(inv, 4)
+        h, w = m.shape
+        kenar = (set(lab2[0, :]) | set(lab2[-1, :])
+                 | set(lab2[:, 0]) | set(lab2[:, -1]))
+        for i in range(1, n2):
+            if i not in kenar and st2[i, cv2.CC_STAT_AREA] < 0.02 * h * w:
+                m[lab2 == i] = 1
+        return m.astype(bool)
+
+    def _measure_point(self, dsp, gray, cy, cx, roi_half=15):
+        """Bir noktada mesafe olc VE guvenilirligini degerlendir.
+
+        Neden gerekli: WLS filtresi bosluklari TAHMINLE doldurur, bu yuzden
+        'gecerli piksel sayisi' kontrolu her zaman gecer - dokusuz bir yuzeyde
+        bile. Bu, gurultu disparity'sinden (3.5 px) uretilmis 2062 mm gibi
+        sahte olcumlere yol acti. Asagidaki uc olcut bunu yakalar.
+
+        Doner: (mesafe_mm | None, etiket, renk)
+        """
+        h, w = dsp.shape
+        cy = int(np.clip(cy, roi_half, h - roi_half - 1))
+        cx = int(np.clip(cx, roi_half, w - roi_half - 1))
+        y1, y2 = cy - roi_half, cy + roi_half
+        x1, x2 = cx - roi_half, cx + roi_half
+
+        roi = dsp[y1:y2, x1:x2]
+        valid = roi[roi > 0]
+        if len(valid) < 10:
+            return None, "ESLESME YOK", RED
+
+        med = float(np.median(valid))
+        if med <= 0:
+            return None, "ESLESME YOK", RED
+
+        # Mesafe: Z = f*B/d (reprojectImageTo3D ile ayni sonucu verir,
+        # ama tum goruntuyu isletmedigi icin cok daha ucuz)
+        try:
+            f_px = float(self.calib_data["P1"][0, 0])
+            b_m = float(np.linalg.norm(self.calib_data["T"]))
+        except Exception:
+            return None, "KALIBRASYON YOK", RED
+        z_mm = f_px * b_m / med * 1000.0
+
+        # --- Olcut 1: DOKU ---
+        # SGBM blok eslestirir; doku yoksa eslestirecek desen de yoktur.
+        # Olculdu: avuc ici yerel std 1.14 -> eslesme fiziksel olarak imkansiz.
+        doku = float(gray[y1:y2, x1:x2].std())
+
+        # --- Olcut 2: DISPARITY TUTARLILIGI ---
+        # ROI bir derinlik sinirini kesiyorsa degerler iki kumeye ayrilir;
+        # medyan hangi yuzeye dustugune gore zipllar (476mm vs 937mm olayi).
+        q1, q3 = np.percentile(valid, [25, 75])
+        yayilim = (q3 - q1) / med
+
+        # --- Olcut 3: HAM ESLESME ORANI (WLS oncesi) ---
+        ham_oran = None
+        rm = getattr(self, "_last_raw_mask", None)
+        if rm is not None and rm.shape == dsp.shape:
+            ham_oran = float(rm[y1:y2, x1:x2].mean())
+
+        # --- Olcut 4: OLCULEBILIR ARALIK ---
+        # Arama araligi kadar disparity gorulebilir; daha yakin cisim
+        # araliga sigmaz ve disparity tavana yapisir (sahte ~Z_min okumasi).
+        nd = getattr(self, "_num_disp", 256)
+        z_min = f_px * b_m / (nd - 1) * 1000.0
+
+        if z_mm < z_min * 1.02:
+            return z_mm, f"ARALIK DISI (<{z_min:.0f}mm)", RED
+        if doku < 4.0:
+            return z_mm, f"DOKUSUZ (doku {doku:.1f}) - GUVENILMEZ", RED
+        if ham_oran is not None and ham_oran < 0.25:
+            return z_mm, f"ESLESME ZAYIF (%{ham_oran*100:.0f} ham)", RED
+        if yayilim > 0.20:
+            return z_mm, f"DERINLIK SINIRI (yayilim %{yayilim*100:.0f})", YELLOW
+        if doku < 8.0 or (ham_oran is not None and ham_oran < 0.5):
+            return z_mm, "SINIRDA", YELLOW
+        return z_mm, "GUVENILIR", GREEN
 
     def _clean_disparity(self, dsp):
         """Disparity haritasini temizle: median + morfoloji + kucuk bolge."""
         mask = dsp > 0
-        # 1. Median filtre — tuz-biber gurultusunu temizle
+        # 1. Median filtre - tuz-biber gurultusunu temizle
         dsp_med = cv2.medianBlur(dsp, 5)
         dsp = np.where(mask, dsp_med, 0)
-        # 2. Morfolojik kapama — kucuk delikleri doldur
+        # 2. Morfolojik kapama - kucuk delikleri doldur
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         mask_closed = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
         # 3. Kucuk bolgeleri sil (< 500 piksel)
@@ -2021,12 +3077,18 @@ class CameraApp:
         self.lbl_cmap_desc.config(text=txt)
 
     def _toggle_depth(self):
+        self._quality_frozen = False
         if not self.depth_mode:
-            if self.calib_data is None:
-                if not self._load_calib_data():
-                    self.lbl_depth_status.config(text="Kalibrasyon yok!", fg=RED)
-                    return
+            if not self._ensure_calib_current():
+                self.lbl_depth_status.config(text="Kalibrasyon yok!", fg=RED)
+                return
             self.depth_mode = True
+            self._dsp_history = []
+            self._depth_result = None
+            if self._depth_thread is None or not self._depth_thread.is_alive():
+                self._depth_thread = threading.Thread(
+                    target=self._depth_worker, daemon=True)
+                self._depth_thread.start()
             self.btn_depth.config(text="Derinlik ACIK", bg="#2d6a4f")
             self.lbl_depth_status.config(text="Aktif", fg=GREEN)
             self.lbl_depth_calib.config(text="HAZIR", fg=GREEN)
@@ -2036,7 +3098,8 @@ class CameraApp:
             self.lbl_depth_status.config(text="Kapali", fg=MUTED)
 
     def _save_depth(self):
-        if not self.depth_mode:
+        if not self.depth_mode and not getattr(self, '_quality_frozen', False):
+            self.lbl_depth_status.config(text="Once derinligi ac veya F ile cekim yap!", fg=YELLOW)
             return
         with self.lock:
             fl = self.frame_l
@@ -2048,8 +3111,7 @@ class CameraApp:
         gray_l = cv2.cvtColor(rect_l, cv2.COLOR_BGR2GRAY)
         gray_r = cv2.cvtColor(rect_r, cv2.COLOR_BGR2GRAY)
         disp = self._compute_disparity(gray_l, gray_r)
-        d_max = disp.max() if disp.max() > 0 else 1
-        d_norm = (disp / d_max * 255).astype(np.uint8)
+        d_norm = self._normalize_disp(disp)
         cmap_id = self.colormap_map.get(
             self.colormap_var.get(), cv2.COLORMAP_JET)
         depth_color = cv2.applyColorMap(d_norm, cmap_id)
@@ -2067,119 +3129,268 @@ class CameraApp:
         cv2.imwrite(os.path.join(out_dir, f"depth_{ts}_overlay.png"), overlay)
         self.lbl_depth_status.config(text=f"Kaydedildi: {ts}", fg=GREEN)
 
-    def _capture_4k_depth(self):
-        """4K foto modu: kameralari gecici olarak 3840x2160'a cikart, tek kare cek, derinlik hesapla."""
-        if self.calib_data is None:
-            if not self._load_calib_data():
-                self.lbl_depth_status.config(text="Kalibrasyon yok!", fg=RED)
-                return
+    def _capture_quality_frame(self):
+        """Kaliteli tek kare: 10 farkli kare yakala, ortala, ozenli SGBM isle, ekranda goster ve kaydet."""
+        if self._quality_frozen:
+            self._quality_frozen = False
+            self.lbl_depth_status.config(
+                text="Canli moda donuldu" if self.depth_mode else "Kapali", fg=MUTED)
+            return
+        if not self._ensure_calib_current():
+            self.lbl_depth_status.config(text="Kalibrasyon yok!", fg=RED)
+            return
+        if self.map1x is None:
+            self.lbl_depth_status.config(text="Kalibrasyon yuklenemedi!", fg=RED)
+            return
 
-        self.lbl_depth_status.config(text="4K cekim yapiliyor...", fg=YELLOW)
+        self.lbl_depth_status.config(text="Kaliteli cekim: cismi sabit tut...", fg=YELLOW)
         self.root.update()
 
-        def do_4k():
+        def do_quality():
             try:
-                cap_l = cv2.VideoCapture(self.left_idx, cv2.CAP_MSMF)
-                cap_r = cv2.VideoCapture(self.right_idx, cv2.CAP_MSMF)
-                fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-                for cap in [cap_l, cap_r]:
-                    cap.set(cv2.CAP_PROP_FOURCC, fourcc)
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3840)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
+                N_FRAMES = 10
+                acc_l = None
+                acc_r = None
+                collected = 0
+                last_hash = None
+                attempts = 0
+                max_attempts = N_FRAMES * 8
+                while collected < N_FRAMES and attempts < max_attempts:
+                    attempts += 1
+                    with self.lock:
+                        raw_l = self.frame_l
+                        raw_r = self.frame_r
+                    if raw_l is None or raw_r is None:
+                        time.sleep(0.05)
+                        continue
+                    cur_hash = hash(raw_l.data.tobytes()[:1024])
+                    if cur_hash == last_hash:
+                        time.sleep(0.05)
+                        continue
+                    last_hash = cur_hash
+                    rl = cv2.remap(raw_l, self.map1x, self.map1y, cv2.INTER_LINEAR)
+                    rr = cv2.remap(raw_r, self.map2x, self.map2y, cv2.INTER_LINEAR)
+                    gl = cv2.cvtColor(rl, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                    gr = cv2.cvtColor(rr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                    if acc_l is None:
+                        acc_l = gl
+                        acc_r = gr
+                        rect_l_color = rl.copy()
+                    else:
+                        acc_l += gl
+                        acc_r += gr
+                    collected += 1
+                    self.root.after(0, lambda c=collected: self.lbl_depth_status.config(
+                        text=f"Kaliteli cekim: {c}/{N_FRAMES} kare...", fg=YELLOW))
+                    time.sleep(0.05)
 
-                for _ in range(3):
-                    cap_l.read()
-                    cap_r.read()
-
-                ret_l, frame_l = cap_l.read()
-                ret_r, frame_r = cap_r.read()
-                cap_l.release()
-                cap_r.release()
-
-                if not ret_l or not ret_r:
+                if collected < 3:
                     self.root.after(0, lambda: self.lbl_depth_status.config(
-                        text="4K cekim basarisiz!", fg=RED))
+                        text="Yeterli kare toplanamadi!", fg=RED))
                     return
 
-                h4k, w4k = frame_l.shape[:2]
+                self.root.after(0, lambda: self.lbl_depth_status.config(
+                    text="Isleniyor...", fg=YELLOW))
 
-                K1 = self.calib_data["K1"].copy()
-                D1 = self.calib_data["D1"].copy()
-                K2 = self.calib_data["K2"].copy()
-                D2 = self.calib_data["D2"].copy()
-                R1, R2 = self.calib_data["R1"], self.calib_data["R2"]
-                P1, P2 = self.calib_data["P1"].copy(), self.calib_data["P2"].copy()
-                calib_size = tuple(self.calib_data["image_size"])
+                gray_l = np.round(acc_l / collected).astype(np.uint8)
+                gray_r = np.round(acc_r / collected).astype(np.uint8)
 
-                sx = w4k / calib_size[0]
-                sy = h4k / calib_size[1]
-                K1[0, :] *= sx; K1[1, :] *= sy
-                K2[0, :] *= sx; K2[1, :] *= sy
-                P1[0, :] *= sx; P1[1, :] *= sy
-                P2[0, :] *= sx; P2[1, :] *= sy
+                if self.clahe_var.get():
+                    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+                    gray_l = clahe.apply(gray_l)
+                    gray_r = clahe.apply(gray_r)
+                gray_r = self._tone_match(gray_l, gray_r, self.tone_var.get())
+                gray_l = cv2.GaussianBlur(gray_l, (5, 5), 0)
+                gray_r = cv2.GaussianBlur(gray_r, (5, 5), 0)
 
-                map1x, map1y = cv2.initUndistortRectifyMap(
-                    K1, D1, R1, P1, (w4k, h4k), cv2.CV_32FC1)
-                map2x, map2y = cv2.initUndistortRectifyMap(
-                    K2, D2, R2, P2, (w4k, h4k), cv2.CV_32FC1)
-
-                rect_l = cv2.remap(frame_l, map1x, map1y, cv2.INTER_LINEAR)
-                rect_r = cv2.remap(frame_r, map2x, map2y, cv2.INTER_LINEAR)
-                gray_l = cv2.cvtColor(rect_l, cv2.COLOR_BGR2GRAY)
-                gray_r = cv2.cvtColor(rect_r, cv2.COLOR_BGR2GRAY)
-
-                num_disp = 512
-                stereo_4k = cv2.StereoSGBM_create(
-                    minDisparity=0, numDisparities=num_disp, blockSize=5,
-                    P1=8*3*49, P2=32*3*49, disp12MaxDiff=1,
-                    uniquenessRatio=15, speckleWindowSize=200, speckleRange=2,
+                nd_q = getattr(self, "_num_disp", 256)
+                stereo_q = cv2.StereoSGBM_create(
+                    minDisparity=0, numDisparities=nd_q, blockSize=9,
+                    P1=8*3*81, P2=32*3*81, disp12MaxDiff=1,
+                    uniquenessRatio=15, speckleWindowSize=250, speckleRange=2,
                     preFilterCap=63, mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
-                stereo_4k_r = cv2.ximgproc.createRightMatcher(stereo_4k)
-                wls_4k = cv2.ximgproc.createDisparityWLSFilter(stereo_4k)
-                wls_4k.setLambda(8000)
-                wls_4k.setSigmaColor(1.5)
+                stereo_q_r = cv2.ximgproc.createRightMatcher(stereo_q)
+                wls_q = cv2.ximgproc.createDisparityWLSFilter(stereo_q)
+                wls_q.setLambda(12000)
+                wls_q.setSigmaColor(1.2)
 
-                dsp_l = stereo_4k.compute(gray_l, gray_r)
-                dsp_r = stereo_4k_r.compute(gray_r, gray_l)
-                dsp = wls_4k.filter(dsp_l, gray_l, disparity_map_right=dsp_r)
+                dsp_l = stereo_q.compute(gray_l, gray_r)
+                dsp_r = stereo_q_r.compute(gray_r, gray_l)
+                self._q_raw_mask = (dsp_l > 0)     # WLS oncesi gercek eslesme
+                dsp = wls_q.filter(dsp_l, gray_l, disparity_map_right=dsp_r)
                 dsp = dsp.astype(np.float32) / 16.0
                 dsp[dsp <= 0] = 0
                 dsp = self._clean_disparity(dsp)
 
-                Q4k = self.calib_data["Q"].copy()
-                Q4k[0, 3] *= sx
-                Q4k[1, 3] *= sy
-                Q4k[2, 3] = P1[0, 0]
+                # Zemin cikarma yalnizca GORUNTULEME icin uygulanir.
+                # Olcum ve kapsama istatistigi cikarma ONCESI haritadan
+                # alinir: aksi halde "dolgulu %20" gibi degerler eslesme
+                # basarisizligi sanilir, oysa o pikseller kasten silinmis
+                # zemindir. Merkez nokta masa uzerindeyse de "ESLESME YOK"
+                # denip gercek mesafe kaybedilirdi.
+                dsp_olcum = dsp
+                if self.ground_var.get():
+                    if self._load_ground_data():
+                        dsp_olcum = dsp.copy()      # cikarma oncesi sakla
+                        dsp = self._remove_ground(dsp)
+                    else:
+                        self.root.after(0, lambda: self.lbl_ground.config(
+                            text="Zemin duzlemi YOK - once 'Zemin tespit et'",
+                            fg=RED))
 
-                d_max = dsp.max() if dsp.max() > 0 else 1
-                d_norm = (dsp / d_max * 255).astype(np.uint8)
+                h, w = dsp.shape
+                cy, cx = h // 2, w // 2
+                onceki_mask = getattr(self, "_last_raw_mask", None)
+                self._last_raw_mask = self._q_raw_mask
+                cz, q_etiket, q_renk = self._measure_point(
+                    dsp_olcum, gray_l, cy, cx, roi_half=25)
+                self._last_raw_mask = onceki_mask
+                # Nokta zemin olarak silindiyse bunu belirt - mesafe yine
+                # dogru, sadece olculen sey masa yuzeyi.
+                if dsp_olcum is not dsp and cz is not None and dsp[cy, cx] <= 0:
+                    q_etiket += " (ZEMIN)"
+                center_dist = (f"  Merkez: {cz:.0f} mm [{q_etiket}]"
+                               if cz is not None else f"  [{q_etiket}]")
+
+                # Iki ayri kapsama: WLS SONRASI (doldurulmus) ve HAM (gercek
+                # eslesme). "%99.9" gibi degerler WLS dolgusundan gelir ve
+                # kalite gostergesi DEGILDIR - ham oran gercegi soyler.
+                usable_area = dsp_olcum[:, nd_q:]
+                valid_pct = (usable_area > 0).sum() / usable_area.size * 100
+                rm = getattr(self, "_q_raw_mask", None)
+                ham_pct = (float(rm[:, nd_q:].mean()) * 100
+                           if rm is not None else float("nan"))
+                d_norm = self._normalize_disp(dsp)
                 cmap_id = self.colormap_map.get(
                     self.colormap_var.get(), cv2.COLORMAP_JET)
                 depth_color = cv2.applyColorMap(d_norm, cmap_id)
                 depth_color[dsp <= 0] = [0, 0, 0]
-                overlay = rect_l.copy()
+                overlay = rect_l_color.copy()
                 mask = dsp > 0
-                overlay[mask] = cv2.addWeighted(rect_l, 0.4, depth_color, 0.6, 0)[mask]
+                overlay[mask] = cv2.addWeighted(rect_l_color, 0.4, depth_color, 0.6, 0)[mask]
+
+                cv2.line(overlay, (cx - 20, cy), (cx + 20, cy), (0, 255, 0), 2)
+                cv2.line(overlay, (cx, cy - 20), (cx, cy + 20), (0, 255, 0), 2)
+                if center_dist:
+                    cv2.putText(overlay, center_dist.strip(), (cx + 25, cy - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                disp_gray = cv2.cvtColor(d_norm, cv2.COLOR_GRAY2BGR)
+                disp_gray[dsp <= 0] = [0, 0, 0]
+                self._quality_overlay = overlay.copy()
+                self._quality_depth = disp_gray.copy()
+                self._quality_dsp = dsp.copy()
+                self._quality_gray_l = gray_l.copy()   # guvenilirlik icin
+                self._current_dsp = dsp.copy()
+                self._quality_rect_l = rect_l_color.copy()
+                self._click_point = None
+                self._quality_frozen = True
 
                 out_dir = os.path.join(PROJECT_DIR, "output", "depth_captures")
                 os.makedirs(out_dir, exist_ok=True)
                 ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                cv2.imwrite(os.path.join(out_dir, f"4k_{ts}_sol.png"), rect_l)
-                cv2.imwrite(os.path.join(out_dir, f"4k_{ts}_sag.png"), rect_r)
-                cv2.imwrite(os.path.join(out_dir, f"4k_{ts}_derinlik.png"), depth_color)
-                cv2.imwrite(os.path.join(out_dir, f"4k_{ts}_overlay.png"), overlay)
-                cv2.imwrite(os.path.join(out_dir, f"4k_{ts}_disparity.png"), d_norm)
+                cv2.imwrite(os.path.join(out_dir, f"q_{ts}_sol.png"), rect_l_color)
+                cv2.imwrite(os.path.join(out_dir, f"q_{ts}_derinlik.png"), depth_color)
+                cv2.imwrite(os.path.join(out_dir, f"q_{ts}_overlay.png"), overlay)
+                cv2.imwrite(os.path.join(out_dir, f"q_{ts}_disparity.png"), d_norm)
+                cv2.imwrite(os.path.join(out_dir, f"q_{ts}_gray_l.png"), gray_l)
+                cv2.imwrite(os.path.join(out_dir, f"q_{ts}_gray_r.png"), gray_r)
+                np.savez_compressed(os.path.join(out_dir, f"q_{ts}_data.npz"),
+                                    disparity=dsp, gray_l=gray_l, gray_r=gray_r)
 
-                self.root.after(0, lambda: self.lbl_depth_status.config(
-                    text=f"4K kaydedildi: {ts} ({w4k}x{h4k})", fg=GREEN))
+                msg = (f"Kaydedildi: {ts} | {collected} kare | "
+                       f"Eslesme: ham %{ham_pct:.0f} / dolgulu %{valid_pct:.0f}"
+                       f" |{center_dist}")
+                mrenk = q_renk if q_renk is not GREEN else GREEN
+                self.root.after(0, lambda m=msg, r=mrenk:
+                                self.lbl_depth_status.config(text=m, fg=r))
             except Exception as ex:
                 self.root.after(0, lambda: self.lbl_depth_status.config(
-                    text=f"4K hata: {ex}", fg=RED))
+                    text=f"Kaliteli cekim hata: {ex}", fg=RED))
 
-        import threading
-        threading.Thread(target=do_4k, daemon=True).start()
+        self._quality_frozen = False
+        threading.Thread(target=do_quality, daemon=True).start()
 
-    # ── Olcum ────────────────────────────────────────
+    def _verify_distance(self):
+        """Merkez mesafeyi gercek degerle karsilastir ve olcum defterine yaz."""
+        try:
+            val = self.verify_entry.get().strip().lower()
+            if val.endswith("cm"):
+                real_mm = float(val.replace("cm", "")) * 10
+            elif val.endswith("mm"):
+                real_mm = float(val.replace("mm", ""))
+            else:
+                real_mm = float(val)
+                if real_mm < 100:
+                    real_mm *= 10
+        except (ValueError, AttributeError):
+            self.lbl_verify_result.config(
+                text="Mesafeyi gir: 600 veya 60cm (mm varsayilan)", fg=YELLOW)
+            return
+        if real_mm <= 0:
+            self.lbl_verify_result.config(text="Gecersiz deger!", fg=RED)
+            return
+
+        measured, etiket, renk = None, "", GREEN
+        if getattr(self, '_quality_frozen', False) and hasattr(self, '_quality_dsp'):
+            dsp = self._quality_dsp
+            h, w = dsp.shape
+            if self._click_point is not None:
+                cy, cx = self._click_point
+            else:
+                cy, cx = h // 2, w // 2
+            gq = getattr(self, "_quality_gray_l", None)
+            if gq is None:
+                gq = cv2.cvtColor(self._quality_rect_l, cv2.COLOR_BGR2GRAY)
+            measured, etiket, renk = self._measure_point(dsp, gq, cy, cx,
+                                                         roi_half=25)
+        else:
+            measured = getattr(self, "_last_center_mm", None)
+            etiket = getattr(self, "_last_quality", "GUVENILIR")
+
+        if measured is None or measured <= 0:
+            self.lbl_verify_result.config(
+                text=f"Olcum alinamadi: {etiket or 'once F ile cekim yap'}",
+                fg=YELLOW)
+            return
+
+        # Guvenilmez olcum RAPOR VERISINE girmemeli - defter bozulur
+        if renk is RED:
+            self.lbl_verify_result.config(
+                text=f"REDDEDILDI: {etiket}\nOlcum noktasini dokulu bir yuzeye "
+                     f"tasi (tikla) veya cismi yaklastir/uzaklastir.", fg=RED)
+            return
+
+        error_mm = measured - real_mm
+        error_pct = abs(error_mm) / real_mm * 100
+        quality = "BASARILI" if error_pct < 3 else ("KABUL EDILEBILIR" if error_pct < 5 else "KOTU")
+        color = GREEN if error_pct < 3 else (YELLOW if error_pct < 5 else RED)
+
+        result = (f"Gercek: {real_mm:.0f} mm | Olculen: {measured:.0f} mm | "
+                  f"Hata: {error_mm:+.1f} mm ({error_pct:.1f}%) - {quality}")
+        self.lbl_verify_result.config(text=result, fg=color)
+
+        # Olcum defteri semasi: tarih,saat,asama,parametre,ayar,deger,birim,not
+        # (mevcut dosyanin basligi budur - sema disi satir yazilirsa defter bozulur)
+        header_needed = not os.path.exists(DIARY_PATH)
+        now = datetime.datetime.now()
+        date = now.strftime("%Y-%m-%d")
+        time_ = now.strftime("%H:%M")
+        exp = self.exposure_var.get()
+        gain = self.gain_var.get()
+        wb = self.wb_var.get()
+        ayar = f"poz={exp} gain={gain} wb={wb}"
+        with open(DIARY_PATH, "a", encoding="utf-8") as f:
+            if header_needed:
+                f.write("tarih,saat,asama,parametre,ayar,deger,birim,not\n")
+            f.write(f"{date},{time_},dogrulama,olculen_mesafe,{ayar},"
+                    f"{measured:.1f},mm,gercek={real_mm:.0f}mm\n")
+            f.write(f"{date},{time_},dogrulama,hata,{ayar},"
+                    f"{error_mm:.1f},mm,gercek={real_mm:.0f}mm\n")
+            f.write(f"{date},{time_},dogrulama,hata_yuzde,{ayar},"
+                    f"{error_pct:.1f},%,{quality}\n")
+
+    # â”€â”€ Olcum â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _capture_bg(self):
         with self.lock:
             fl = self.frame_l
@@ -2189,10 +3400,9 @@ class CameraApp:
             self.lbl_meas_status.config(text="Arka plan hazir, nesneyi koy ve M bas", fg=YELLOW)
 
     def _do_measure(self):
-        if self.calib_data is None:
-            if not self._load_calib_data():
-                self.lbl_meas_status.config(text="Kalibrasyon yok!", fg=RED)
-                return
+        if not self._ensure_calib_current():
+            self.lbl_meas_status.config(text="Kalibrasyon yok!", fg=RED)
+            return
         if self.ground_data is None:
             if os.path.exists(GROUND_PATH):
                 self.ground_data = np.load(GROUND_PATH)
@@ -2307,7 +3517,7 @@ class CameraApp:
         except Exception as e:
             self.lbl_meas_status.config(text=f"Hata: {str(e)[:50]}", fg=RED)
 
-    # ── Durum tab islemleri ──────────────────────────
+    # â”€â”€ Durum tab islemleri â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _refresh_status(self):
         sq = None
         if os.path.exists(CONFIG_PATH):
@@ -2375,7 +3585,7 @@ class CameraApp:
 
     def _run_script(self, script_name, args=None):
         script = os.path.join(SCRIPT_DIR, script_name)
-        cmd = ["python", script]
+        cmd = [sys.executable, script]
         if args:
             cmd.extend(args)
         self._append_process_output(f">>> {' '.join(cmd)}")
@@ -2394,16 +3604,23 @@ class CameraApp:
         threading.Thread(target=run, daemon=True).start()
 
     def _run_ground_plane(self):
-        script = os.path.join(SCRIPT_DIR, "ground_plane.py")
-        self._append_process_output(">>> Zemin tespiti baslatiliyor (ayri pencere)...")
-        subprocess.Popen(["python", script,
-                          "--left", str(self.left_idx),
-                          "--right", str(self.right_idx)])
+        """Zemin tespitini UYGULAMA ICINDE yap.
+
+        Eskiden ground_plane.py'yi ayri surec olarak baslatiyordu; uygulama
+        kameralari zaten acik tuttugu icin o surec kamerayi acamiyor ve
+        sessizce basarisiz oluyordu. Artik ayni is Derinlik tabindaki
+        mantikla, mevcut kare uzerinden yapiliyor.
+        """
+        self._append_process_output(
+            ">>> Zemin tespiti (uygulama ici, rektifiye cerceve)...")
+        self._detect_ground_plane()
+        self._append_process_output(self.lbl_ground.cget("text"))
+        self._refresh_status()
 
     def _run_focus_test(self):
         script = os.path.join(SCRIPT_DIR, "odak_test.py")
         self._append_process_output(">>> Odak testi baslatiliyor (ayri pencere)...")
-        subprocess.Popen(["python", script,
+        subprocess.Popen([sys.executable, script,
                           "--left", str(self.left_idx),
                           "--right", str(self.right_idx)])
 
