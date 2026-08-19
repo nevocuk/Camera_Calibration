@@ -431,6 +431,36 @@ Sol-sag tutarlilik kontrolu, 6 gercek cift:
 yuzeye dik degil yandan/yayvan vermek, parlak masayi dogrudan
 kullanmamak. Yazilimla duzeltilemez.
 
+### minDisparity ile yakina kaydirma - UZAK ARKA PLANDA ZARARLI (2026-08-18)
+SGBM `[minDisparity, minDisparity+numDisparities)` tarar. minDisparity'yi
+buyutmek pencereyi yakina kaydirir ve maliyeti ARTIRMAZ (maliyet
+numDisparities ile orantili):
+
+| md | nd | Aralik | Olu kenar | Maliyet |
+|---|---|---|---|---|
+| 0 | 256 | 399 mm - sonsuz | %12.5 | 1.0x |
+| 128 | 256 | 266 - 795 mm | %18.8 | 1.0x |
+| 0 | 384 | 266 mm - sonsuz | %18.8 | 1.5x |
+
+**AMA acik sahnede kullanilamaz.** Gercek ciftlerde olculdu:
+
+| | md=0 | md=192 |
+|---|---|---|
+| Sahnenin 530 mm otesi orani | %51-79 | **%0-1** |
+| Ham eslesme | %96-99 | **%100** |
+| Merkez Z (bir cekim) | 442 mm | **261 mm** |
+
+**Teknik neden:** pencerenin disindaki uzak pikseller GECERSIZ OLMUYOR,
+pencere icine SIKISTIRILIYOR - yakin gibi hesaplaniyorlar. Ustelik ham
+eslesme orani %100'e cikiyor cunku SGBM zorla bir eslesme buluyor;
+kalite gostergesi yaniltici derecede iyi gorunuyor.
+
+**Kural:** md>0 yalnizca cercevede uzak hicbir sey yokken (kapali olcum
+kutusu, tepeden bakan dar cerceve) kullanilabilir. Suphedeysen md=0.
+Uygulama md>0 secilince uyari gosterir ve pencerenin uzak ucunda
+yigilma (%10+) tespit ederse cekim satirinda "SAHNE ARALIK DISINA
+TASIYOR" yazar.
+
 ### Dokusuz yuzeyler
 SGBM blok esleme tabanli — tekrar eden veya tamamen duz yuzeyler (beyaz duvar, parlak metal, cam) icin disparity uretemiyor. `patterns/sgbm_doku_desenleri_v2.pdf` bu amacla basildi: cismin uzerine veya arkasina doku deseni konularak esleme kalitesi artirilabilir.
 

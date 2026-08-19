@@ -206,6 +206,10 @@ class CameraApp:
         self._click_point = None
         self._display_scale = 1.0
         self._display_fl_w = 0
+        self._display_fl_h = 0
+        self._pre_ground_dsp = None
+        self._son_olcum = None
+        self._bekleyen = {}
         self._current_dsp = None
         # Derinlik ayri thread'de hesaplanir (ana thread donmesin)
         self._depth_lock = threading.Lock()
@@ -215,6 +219,7 @@ class CameraApp:
         self._last_raw_mask = None
         self._last_quality = ""
         self._num_disp = 256          # disparity arama araligi (yakin sinir)
+        self._min_disp = 0            # arama penceresinin BASLANGICI
         self._sgbm_cache = {}
 
         self._load_settings()
@@ -1156,6 +1161,25 @@ class CameraApp:
                            bg=CARD, fg=FG, selectcolor=BORDER,
                            activebackground=CARD, activeforeground=FG,
                            font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=3)
+        # SGBM [minDisparity, minDisparity+numDisparities) araligini tarar.
+        # minDisparity'yi buyutmek pencereyi YAKINA kaydirir ve maliyeti
+        # ARTIRMAZ (maliyet numDisparities ile orantili). Bedeli uzak
+        # ucu kaybetmek ve olu bandin genislemesi.
+        #   md=0   nd=256 -> 399 mm .. sonsuz, olu %12.5, 1.0x
+        #   md=128 nd=256 -> 266 mm .. 795 mm, olu %18.8, 1.0x
+        #   md=192 nd=256 -> 228 mm .. 530 mm, olu %21.9, 1.0x
+        #   md=0   nd=384 -> 266 mm .. sonsuz, olu %18.8, 1.5x
+        md_row = tk.Frame(c, bg=CARD)
+        md_row.pack(fill=tk.X, pady=4)
+        tk.Label(md_row, text="Arama basi (yakina kaydir):", bg=CARD, fg=FG,
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self.mindisp_var = tk.StringVar(value="0")
+        for d, e in (("0", "0 (uzak dahil)"), ("128", "128"), ("192", "192")):
+            tk.Radiobutton(md_row, text=e, variable=self.mindisp_var, value=d,
+                           command=self._on_numdisp_change,
+                           bg=CARD, fg=FG, selectcolor=BORDER,
+                           activebackground=CARD, activeforeground=FG,
+                           font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=3)
         self.lbl_numdisp = tk.Label(c, text="", bg=CARD, fg=MUTED,
                                     font=("Segoe UI", 8), justify="left",
                                     anchor="w", wraplength=380)
@@ -1199,7 +1223,7 @@ class CameraApp:
         zem_row = tk.Frame(c, bg=CARD)
         zem_row.pack(fill=tk.X, pady=4)
         self.ground_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(zem_row, text="Zemin/masa cikar",
+        tk.Checkbutton(zem_row, text="Zemin/masa cikar (OLCUM icin)",
                        variable=self.ground_var, bg=CARD, fg=FG,
                        selectcolor=BORDER, activebackground=CARD,
                        activeforeground=FG, font=("Segoe UI", 9)
@@ -1302,6 +1326,11 @@ class CameraApp:
                   command=self._do_measure,
                   bg="#2d6a4f", fg="white", font=("Segoe UI", 10, "bold"),
                   relief="flat", padx=12, pady=6, cursor="hand2").pack(side=tk.LEFT)
+        tk.Button(btn_row, text="Duzlemle olc",
+                  command=self._measure_object_plane,
+                  bg="#1a5276", fg="white", font=("Segoe UI", 10, "bold"),
+                  relief="flat", padx=12, pady=6,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(6, 0))
 
         c = self._section(tab, "Sonuc")
         self.lbl_meas_en = self._info_row(c, "En (mm)")
@@ -1696,8 +1725,11 @@ class CameraApp:
             cap.set(cv2.CAP_PROP_HUE, 0)
             cap.set(cv2.CAP_PROP_BACKLIGHT, 0)
         # Telafili ayarlar (sag = sol + telafi)
-        self._on_exposure()
-        self._on_gain()
+        # Geciktirmeli sarmalayicilar DEGIL, dogrudan yazicilar:
+        # _rewrite_all_settings bu fonksiyonu uc kez ard arda cagirir ve
+        # her cagrinin gercekten yazmasi gerekir.
+        self._yaz_exposure()
+        self._yaz_gain()
         self._on_bright_offset()
 
     def _set_prop(self, prop, val):
@@ -1705,7 +1737,29 @@ class CameraApp:
             if cap and cap.isOpened():
                 cap.set(prop, val)
 
+    def _gecikmeli(self, anahtar, fn, ms=250):
+        """Ayni islemi tekrar tekrar cagirmak yerine SONUNCUSUNU uygula.
+
+        Neden gerekli: SpinSlider her hareket olayinda komutu cagiriyor.
+        Pozlamayi -2'den -6'ya suruklemek onlarca ardisik cap.set()
+        uretiyor ve MSMF bu hizli yazimlarin bir kismini yutuyor. Yazim
+        bir kameraya ulasip digerine ulasmayinca kameralar KALICI olarak
+        ayrisiyor - geri okuma bozuk oldugu icin de gorunmuyor.
+        (Gozlendi: pozlamayla oynadikca parlaklik orani 1.04x -> 3.14x.)
+        Kullanici slider'i birakinca tek bir yazim yapilir.
+        """
+        eski = self._bekleyen.get(anahtar)
+        if eski is not None:
+            try:
+                self.root.after_cancel(eski)
+            except Exception:
+                pass
+        self._bekleyen[anahtar] = self.root.after(ms, fn)
+
     def _on_exposure(self):
+        self._gecikmeli("poz", self._yaz_exposure)
+
+    def _yaz_exposure(self):
         exp = self.exposure_var.get()
         for cap in [self.cap_l, self.cap_r]:
             if cap and cap.isOpened():
@@ -1715,8 +1769,21 @@ class CameraApp:
         if self.cap_r and self.cap_r.isOpened():
             self.cap_r.set(cv2.CAP_PROP_EXPOSURE,
                            max(-13, min(0, exp + self.exp_offset_r.get())))
+        # MSMF ilk yazimi yutabiliyor - akis ilerledikten sonra tekrarla
+        self.root.after(220, self._yaz_exposure_tekrar)
+
+    def _yaz_exposure_tekrar(self):
+        exp = self.exposure_var.get()
+        if self.cap_l and self.cap_l.isOpened():
+            self.cap_l.set(cv2.CAP_PROP_EXPOSURE, exp)
+        if self.cap_r and self.cap_r.isOpened():
+            self.cap_r.set(cv2.CAP_PROP_EXPOSURE,
+                           max(-13, min(0, exp + self.exp_offset_r.get())))
 
     def _on_gain(self):
+        self._gecikmeli("gain", self._yaz_gain)
+
+    def _yaz_gain(self):
         g = self.gain_var.get()
         if self.cap_l and self.cap_l.isOpened():
             self.cap_l.set(cv2.CAP_PROP_GAIN, g)
@@ -1808,6 +1875,11 @@ class CameraApp:
                            max(-64, min(64, val + self.bright_offset_r.get())))
 
     def _on_img_prop(self):
+        # Pozlama/gain ile ayni gerekce: slider suruklenirken onlarca
+        # yazim uretilir, MSMF bir kismini yutar ve kameralar ayrisir.
+        self._gecikmeli("img", self._yaz_img_prop)
+
+    def _yaz_img_prop(self):
         # Parlakligi _on_bright_offset uzerinden uygula - dogrudan
         # _set_prop kullanilirsa SAG kameranin parlaklik telafisi silinir
         self._on_bright_offset()
@@ -2045,12 +2117,30 @@ class CameraApp:
             return
         s = self._display_scale
         fl_w = self._display_fl_w
-        if s <= 0 or fl_w <= 0:
+        fl_h = getattr(self, "_display_fl_h", 0)
+        if s <= 0 or fl_w <= 0 or fl_h <= 0:
             return
-        img_x = int(event.x / s)
-        img_y = int(event.y / s)
-        if img_x >= fl_w:
+        # Ekran -> birlesik goruntu koordinati
+        gx = event.x / s
+        gy = event.y / s
+        if gx >= fl_w:          # sag panele tiklandi
             return
+        # Birlesik goruntu -> DISPARITY koordinati.
+        # Dogrudan bolmek YETMEZ: gosterilen sol panel ile disparity
+        # haritasi ayni boyutta olmayabilir (yukseklik esitleme,
+        # kaliteli kare overlay'inin yeniden boyutlanmasi). Bu yuzden
+        # KESIR uzerinden cevriliyor - ara boyut ne olursa olsun dogru.
+        ref = self._current_dsp if self._current_dsp is not None else None
+        if ref is None and self.calib_data is not None:
+            w0, h0 = tuple(int(v) for v in self.calib_data["image_size"])
+        elif ref is not None:
+            h0, w0 = ref.shape[:2]
+        else:
+            h0, w0 = int(fl_h), int(fl_w)
+        img_x = int(gx / fl_w * w0)
+        img_y = int(gy / fl_h * h0)
+        img_x = max(0, min(img_x, w0 - 1))
+        img_y = max(0, min(img_y, h0 - 1))
         self._click_point = (img_y, img_x)
         if getattr(self, '_quality_frozen', False) and self._current_dsp is not None:
             dsp = self._current_dsp
@@ -2243,6 +2333,7 @@ class CameraApp:
                 cv2.putText(fr, f"SAG (idx {self.right_idx})", (10, h_fr - 15),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
             self._display_fl_w = fl.shape[1]
+            self._display_fl_h = fl.shape[0]
             combined = np.hstack([fl, fr])
 
             mw = max(self.cam_label.winfo_width(), 100)
@@ -2590,19 +2681,41 @@ class CameraApp:
             nd = int(self.numdisp_var.get())
         except (ValueError, AttributeError):
             return
+        try:
+            md = int(self.mindisp_var.get())
+        except (ValueError, AttributeError):
+            md = 0
         self._num_disp = nd
+        self._min_disp = md
         self._sgbm_cache = {}          # yeni araligla yeniden kurulacak
         self._depth_result = None
         if self.calib_data is not None:
             f = float(self.calib_data["P1"][0, 0])
             b = float(np.linalg.norm(self.calib_data["T"])) * 1000
-            z = f * b / (nd - 1)
-            olu = nd / max(self.current_w, 1) * 100
-            self.lbl_numdisp.config(
-                text=(f"En yakin olculebilir: {z:.0f} mm  |  "
-                      f"sol kenarda olu bant %{olu:.1f}  |  "
-                      f"hiz ~{nd/256:.1f}x yavas"),
-                fg=MUTED)
+            z_yakin = f * b / (md + nd - 1)
+            z_uzak = (f * b / md) if md > 0 else None
+            olu = (md + nd) / max(self.current_w, 1) * 100
+            aralik = (f"{z_yakin:.0f} - {z_uzak:.0f} mm" if z_uzak
+                      else f"{z_yakin:.0f} mm ve otesi")
+            metin = (f"Olculebilir aralik: {aralik}  |  "
+                     f"sol kenarda olu bant %{olu:.1f}  |  "
+                     f"hiz ~{nd/256:.1f}x yavas")
+            renk = MUTED
+            if md > 0:
+                # OLCULDU (2026-08-18): uzak arka planli sahnede md>0
+                # zararli. Pencerenin otesindeki pikseller gecersiz
+                # OLMUYOR, pencere icine SIKISTIRILIYOR ve yakin gibi
+                # cikiyor. Gercek ciftlerde sahnenin %51-79'u 530 mm
+                # otesindeyken md=192 sonrasi bu oran %0-1'e dustu;
+                # merkez okumasi 442 -> 261 mm kaydi. Ustelik ham
+                # eslesme %100 gosteriyor - gosterge yaniltici oluyor.
+                metin += (
+                    " !! md>0 yalnizca cercevede UZAK hicbir sey"
+                    " yokken kullanilabilir. Arka planda oda/duvar"
+                    " varsa onlar yakin gibi hesaplanir ve harita"
+                    " bozulur. Suphedeysen 0 sec.")
+                renk = YELLOW
+            self.lbl_numdisp.config(text=metin, fg=renk)
         self._calc_dz()
 
     def _sgbm_for_scale(self, olcek):
@@ -2621,9 +2734,13 @@ class CameraApp:
             return onbellek[anahtar]
         taban = getattr(self, "_num_disp", 256)
         nd = max(16, int(round(taban * olcek / 16)) * 16)
+        # minDisparity de olcekle kucultulmeli: yari cozunurlukte
+        # gercek disparity de yariya iner.
+        md_taban = getattr(self, "_min_disp", 0)
+        md = int(round(md_taban * olcek / 16)) * 16
         bs = 7 if olcek > 0.6 else 5
         st = cv2.StereoSGBM_create(
-            minDisparity=0, numDisparities=nd, blockSize=bs,
+            minDisparity=md, numDisparities=nd, blockSize=bs,
             P1=8*3*bs*bs, P2=32*3*bs*bs, disp12MaxDiff=1,
             uniquenessRatio=15, speckleWindowSize=200, speckleRange=2,
             preFilterCap=63, mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
@@ -2752,6 +2869,7 @@ class CameraApp:
                 with self._depth_lock:
                     self._depth_result = (rl, dsp, gl)
                     self._depth_olcum = dsp_olcum
+                self._pre_ground_dsp = dsp_olcum
             except Exception:
                 time.sleep(0.15)
 
@@ -2862,29 +2980,71 @@ class CameraApp:
                 obj_pts, img_pts = self.board.matchImagePoints(cc, ci)
                 n_kose = len(cc)
 
-            ok, rvec, tvec = cv2.solvePnP(
-                obj_pts, img_pts, K, D, flags=cv2.SOLVEPNP_ITERATIVE)
-            if not ok:
-                self.lbl_ground.config(text="Poz cozulemedi.", fg=RED)
-                return
+            # DUZ HEDEFTE IKI-KOKLULUK (planar pose ambiguity):
+            # Duzlemsel bir desende solvePnP'nin, duzleme gore birbirinin
+            # aynasi olan IKI cozumu vardir ve ikisi de dusuk yeniden
+            # izdusum hatasi verir. Yanlis kok secilirse duzlem tamamen
+            # yanlis yonelir (gozlendi: ayni masada 43.5 derece yerine
+            # 85.2 derece, izdusum 0.68 px ile "temiz" gorunerek).
+            # Bu yuzden IPPE ile HER IKI cozum alinir ve aralarinda
+            # secim GERCEK DERINLIK VERISIYLE yapilir: dogru duzlem,
+            # olculen 3B noktalarin buyuk kismini h~0'da birakandir.
+            try:
+                ok, rvecs, tvecs, hatalar = cv2.solvePnPGeneric(
+                    obj_pts, img_pts, K, D, flags=cv2.SOLVEPNP_IPPE)
+            except cv2.error:
+                ok, rvecs, tvecs, hatalar = False, None, None, None
+            if not ok or rvecs is None or len(rvecs) == 0:
+                ok2, rv, tv = cv2.solvePnP(obj_pts, img_pts, K, D,
+                                           flags=cv2.SOLVEPNP_ITERATIVE)
+                if not ok2:
+                    self.lbl_ground.config(text="Poz cozulemedi.", fg=RED)
+                    return
+                rvecs, tvecs = [rv], [tv]
+                hatalar = [np.array([[0.0]])]
 
-            R_mat, _ = cv2.Rodrigues(rvec)
-            normal = R_mat[:, 2].astype(np.float64)
-            if normal[2] > 0:            # normal kameraya baksin
-                normal = -normal
-            d = float(-np.dot(normal, tvec.ravel()))
+            adaylar = []
+            for k in range(len(rvecs)):
+                Rk, _ = cv2.Rodrigues(rvecs[k])
+                nk = Rk[:, 2].astype(np.float64)
+                if nk[2] > 0:
+                    nk = -nk
+                dk = float(-np.dot(nk, np.asarray(tvecs[k]).ravel()))
+                rp, _ = cv2.projectPoints(obj_pts, rvecs[k], tvecs[k], K, D)
+                rmsk = float(np.sqrt(np.mean(np.sum(
+                    (rp.reshape(-1, 2) - img_pts.reshape(-1, 2)) ** 2, 1))))
+                adaylar.append((nk, dk, rmsk))
+
+            secim, gerekce = 0, "tek cozum"
+            if len(adaylar) > 1:
+                dsp_ref = getattr(self, "_pre_ground_dsp", None)
+                if dsp_ref is None:
+                    dsp_ref = getattr(self, "_current_dsp", None)
+                puan = []
+                if dsp_ref is not None and self.calib_data is not None:
+                    P3 = cv2.reprojectImageTo3D(dsp_ref, self.calib_data["Q"])
+                    iyi = (dsp_ref > 0) & np.isfinite(P3).all(axis=2)
+                    orn = P3[iyi]
+                    if len(orn) > 20000:
+                        orn = orn[::max(1, len(orn) // 20000)]
+                    for nk, dk, _ in adaylar:
+                        hk = np.abs(orn @ nk + dk) * 1000.0
+                        puan.append(float((hk < 20).mean()))     # h~0 orani
+                    secim = int(np.argmax(puan))
+                    gerekce = (f"derinlik uyumu %{puan[secim]*100:.0f}"
+                               f" vs %{puan[1-secim]*100:.0f}")
+                else:
+                    secim = int(np.argmin([a[2] for a in adaylar]))
+                    gerekce = "izdusum hatasi (derinlik verisi yok)"
+
+            normal, d, rms = adaylar[secim]
             aci = float(np.degrees(np.arccos(min(abs(normal[2]), 1.0))))
             mesafe = abs(d) * 1000.0
-
             # ACI BIR HATA OLCUTU DEGIL. Kamera masaya egik baktiginda
             # duzlem normali ile optik eksen arasindaki aci dogal olarak
             # 40-50 derece cikar; tahta yine de masaya tam duz yatiyordur.
             # Gecerliligin gercek olcutu, cozulen pozun kose noktalarini
             # ne kadar iyi acikladigidir: yeniden izdusum hatasi.
-            yeniden, _ = cv2.projectPoints(obj_pts, rvec, tvec, K, D)
-            rms = float(np.sqrt(np.mean(np.sum(
-                (yeniden.reshape(-1, 2) - img_pts.reshape(-1, 2)) ** 2,
-                axis=1))))
             if rms > 2.0:
                 self.lbl_ground.config(
                     text=f"Duzlem uyumsuz (izdusum hatasi {rms:.2f} px). "
@@ -2899,12 +3059,16 @@ class CameraApp:
                      tarih=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
             self.ground_data = None              # yeniden okunmaya zorla
             self._load_ground_data()
-            self.ground_var.set(True)
+            # Kutucugu OTOMATIK ACMIYORUZ. Zemin cikarma bir OLCUM
+            # aracidir, goruntuleme modu degil: acikken sahnenin buyuk
+            # kismi (masadan alcak her sey ve duzlemin altindaki tum
+            # bolgeler) silinir ve haritaya bakmak isteyen kullanici
+            # "bozulmus" gorur. Olcum yapilacagi zaman elle acilir.
             uyari = "  (cok siyirtma acisi, hassasiyet dusuk)" if aci > 70 else ""
             self.lbl_ground.config(
                 text=f"Zemin kaydedildi: {n_kose} kose, izdusum {rms:.2f} px, "
-                     f"bakis acisi {aci:.1f} derece, duzlem {mesafe:.0f} mm. "
-                     f"Cikarma acildi.{uyari}",
+                     f"bakis acisi {aci:.1f} derece, duzlem {mesafe:.0f} mm, {gerekce}. "
+                     f"Olcum icin kutucugu isaretle.{uyari}",
                 fg=YELLOW if aci > 70 else GREEN)
         except Exception as ex:
             self.lbl_ground.config(text=f"Zemin tespiti hatasi: {ex}", fg=RED)
@@ -2996,10 +3160,16 @@ class CameraApp:
         # Arama araligi kadar disparity gorulebilir; daha yakin cisim
         # araliga sigmaz ve disparity tavana yapisir (sahte ~Z_min okumasi).
         nd = getattr(self, "_num_disp", 256)
-        z_min = f_px * b_m / (nd - 1) * 1000.0
+        md = getattr(self, "_min_disp", 0)
+        z_min = f_px * b_m / (md + nd - 1) * 1000.0
+        # minDisparity>0 iken UZAK ucu da kaybederiz - o sinir da kontrol
+        # edilmeli, yoksa arka plan sessizce yanlis okunur.
+        z_max = (f_px * b_m / md * 1000.0) if md > 0 else None
 
         if z_mm < z_min * 1.02:
             return z_mm, f"ARALIK DISI (<{z_min:.0f}mm)", RED
+        if z_max is not None and z_mm > z_max * 0.98:
+            return z_mm, f"ARALIK DISI (>{z_max:.0f}mm)", RED
         if doku < 4.0:
             return z_mm, f"DOKUSUZ (doku {doku:.1f}) - GUVENILMEZ", RED
         if ham_oran is not None and ham_oran < 0.25:
@@ -3204,8 +3374,9 @@ class CameraApp:
                 gray_r = cv2.GaussianBlur(gray_r, (5, 5), 0)
 
                 nd_q = getattr(self, "_num_disp", 256)
+                md_q = getattr(self, "_min_disp", 0)
                 stereo_q = cv2.StereoSGBM_create(
-                    minDisparity=0, numDisparities=nd_q, blockSize=9,
+                    minDisparity=md_q, numDisparities=nd_q, blockSize=9,
                     P1=8*3*81, P2=32*3*81, disp12MaxDiff=1,
                     uniquenessRatio=15, speckleWindowSize=250, speckleRange=2,
                     preFilterCap=63, mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
@@ -3238,6 +3409,9 @@ class CameraApp:
                             text="Zemin duzlemi YOK - once 'Zemin tespit et'",
                             fg=RED))
 
+                # Olcum icin zemin cikarilmamis harita saklanir
+                self._pre_ground_dsp = dsp_olcum
+
                 h, w = dsp.shape
                 cy, cx = h // 2, w // 2
                 onceki_mask = getattr(self, "_last_raw_mask", None)
@@ -3251,14 +3425,29 @@ class CameraApp:
                     q_etiket += " (ZEMIN)"
                 center_dist = (f"  Merkez: {cz:.0f} mm [{q_etiket}]"
                                if cz is not None else f"  [{q_etiket}]")
+                # md>0 iken pencerenin UZAK ucuna (d ~ md) yigilma,
+                # sahnenin araligin disina tastiginin isaretidir.
+                if md_q > 0:
+                    kul_d = dsp_olcum[:, md_q + nd_q:]
+                    gec_d = kul_d > 0
+                    if gec_d.sum() > 1000:
+                        uc = float((kul_d[gec_d] < md_q + 6).mean())
+                        if uc > 0.10:
+                            center_dist += (f"  !! SAHNE ARALIK DISINA "
+                                            f"TASIYOR (%{uc*100:.0f} uzak "
+                                            f"ucta) - 'Arama basi'ni 0 yap")
 
                 # Iki ayri kapsama: WLS SONRASI (doldurulmus) ve HAM (gercek
                 # eslesme). "%99.9" gibi degerler WLS dolgusundan gelir ve
                 # kalite gostergesi DEGILDIR - ham oran gercegi soyler.
-                usable_area = dsp_olcum[:, nd_q:]
+                # Olu bant minDisparity+numDisparities kadardir - yalnizca
+                # nd almak, minDisp>0 iken gecersiz sol seridi istatistige
+                # katar ve orani oldugundan dusuk gosterir.
+                olu_q = md_q + nd_q
+                usable_area = dsp_olcum[:, olu_q:]
                 valid_pct = (usable_area > 0).sum() / usable_area.size * 100
                 rm = getattr(self, "_q_raw_mask", None)
-                ham_pct = (float(rm[:, nd_q:].mean()) * 100
+                ham_pct = (float(rm[:, olu_q:].mean()) * 100
                            if rm is not None else float("nan"))
                 d_norm = self._normalize_disp(dsp)
                 cmap_id = self.colormap_map.get(
@@ -3295,8 +3484,18 @@ class CameraApp:
                 cv2.imwrite(os.path.join(out_dir, f"q_{ts}_disparity.png"), d_norm)
                 cv2.imwrite(os.path.join(out_dir, f"q_{ts}_gray_l.png"), gray_l)
                 cv2.imwrite(os.path.join(out_dir, f"q_{ts}_gray_r.png"), gray_r)
-                np.savez_compressed(os.path.join(out_dir, f"q_{ts}_data.npz"),
-                                    disparity=dsp, gray_l=gray_l, gray_r=gray_r)
+                # ZEMIN CIKARILMAMIS harita da kaydedilir. Yalnizca
+                # cikarilmis hali saklanirsa sonradan "esik neyi yedi"
+                # sorusu cevaplanamaz: silinmis veride tekrar esik
+                # taramasi yapmak dairesel olur.
+                np.savez_compressed(
+                    os.path.join(out_dir, f"q_{ts}_data.npz"),
+                    disparity=dsp,             # gosterilen (zemin cikarilmis)
+                    disparity_ham=dsp_olcum,   # cikarma ONCESI
+                    zemin_cikarildi=bool(self.ground_var.get()),
+                    zemin_esik_mm=int(self.ground_th_var.get()),
+                    raw_mask=self._q_raw_mask,   # WLS oncesi gercek eslesme
+                    gray_l=gray_l, gray_r=gray_r)
 
                 msg = (f"Kaydedildi: {ts} | {collected} kare | "
                        f"Eslesme: ham %{ham_pct:.0f} / dolgulu %{valid_pct:.0f}"
@@ -3399,6 +3598,120 @@ class CameraApp:
             self.lbl_meas_bg.config(text="Kaydedildi", fg=GREEN)
             self.lbl_meas_status.config(text="Arka plan hazir, nesneyi koy ve M bas", fg=YELLOW)
 
+    def _measure_object_plane(self):
+        """Zemin duzlemi + tiklanan nokta ile cismin EN/BOY/YUKSEKLIK'ini olc.
+
+        Neden duzlem koordinatlari: goruntudeki piksel boyutu mesafeye ve
+        bakis acisina gore degisir. Noktalar duzleme izdusurulunce olcu
+        gercek fiziksel boyut olur; cisim egik dursa bile minAreaRect
+        donmus dikdortgeni bulur.
+
+        Neden calisma hacmi: duzlem SONSUZDUR - arkadaki duvar/raf da
+        "duzlemin uzerinde"dir. Olculdu: sinirsizken boy 3219 mm cikti.
+        Bu yuzden hem yukseklik hem KAMERA MESAFESI penceresi uygulanir.
+        """
+        if not self._ensure_calib_current():
+            self.lbl_meas_status.config(text="Kalibrasyon yok", fg=RED)
+            return
+        if not self._load_ground_data():
+            self.lbl_meas_status.config(
+                text="Zemin duzlemi yok - Derinlik tabi > 'Zemin tespit et'",
+                fg=RED)
+            return
+        dsp = getattr(self, "_pre_ground_dsp", None)
+        if dsp is None:
+            dsp = self._current_dsp
+        if dsp is None:
+            self.lbl_meas_status.config(
+                text="Once [F] ile kaliteli kare al", fg=YELLOW)
+            return
+        try:
+            g = self.ground_data
+            n = np.asarray(g["normal"], np.float64).ravel()
+            if (str(g["frame"]) if "frame" in g else "raw") != "rectified":
+                n = np.asarray(self.calib_data["R1"], np.float64) @ n
+            n = n / np.linalg.norm(n)
+            d = float(g["d"])
+
+            pts = cv2.reprojectImageTo3D(dsp, self.calib_data["Q"])
+            gec = (dsp > 0) & np.isfinite(pts).all(axis=2)
+            h = np.full(dsp.shape, -1e9)
+            h[gec] = (pts[gec] @ n + d) * 1000.0
+            Zmm = pts[:, :, 2] * 1000.0
+
+            duzlem = gec & (np.abs(h) < 15)
+            z_masa = float(np.median(Zmm[duzlem])) if duzlem.sum() > 5000 \
+                else float(np.median(Zmm[gec]))
+            esik = max(self.ground_th_var.get(), 1)
+            m = ((h >= esik) & (h <= 400) & gec
+                 & (Zmm < z_masa + 150)).astype(np.uint8)
+            m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (9, 9)))
+            m = cv2.morphologyEx(m, cv2.MORPH_OPEN, cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (5, 5)))
+            m = (m.astype(bool) & gec).astype(np.uint8)
+
+            nlab, lab, st, cen = cv2.connectedComponentsWithStats(m, 8)
+            if nlab < 2:
+                self.lbl_meas_status.config(text="Cisim bulunamadi", fg=RED)
+                return
+            H, W = dsp.shape
+            if self._click_point is not None:
+                hedef = np.array([self._click_point[1], self._click_point[0]],
+                                 float)
+                nasil = "tiklanan nokta"
+            else:
+                hedef = np.array([W / 2.0, H / 2.0])
+                nasil = "goruntu merkezi"
+            aday = [(np.linalg.norm(cen[k] - hedef), k) for k in range(1, nlab)
+                    if st[k, cv2.CC_STAT_AREA] >= 3000]
+            if not aday:
+                self.lbl_meas_status.config(
+                    text="Yeterli buyuklukte cisim yok", fg=RED)
+                return
+            aday.sort()
+            cisim = (lab == aday[0][1])
+
+            yardim = np.array([1.0, 0, 0]) if abs(n[0]) < 0.9 \
+                else np.array([0, 1.0, 0])
+            u = np.cross(n, yardim); u /= np.linalg.norm(u)
+            v = np.cross(n, u);      v /= np.linalg.norm(v)
+            P = pts[cisim] * 1000.0
+            xy = np.stack([P @ u, P @ v], 1).astype(np.float32)
+            (_, _), (w1, w2), _ = cv2.minAreaRect(xy)
+            en, boy = sorted((w1, w2))
+            yuk = float(np.percentile(h[cisim], 98))
+
+            # ARALIK KONTROLU: cismin tepesi Z_min'den yakinsa o
+            # pikseller HIC uretilmez (disparity arama penceresi disi),
+            # nokta bulutunda bulunmazlar ve YUKSEKLIK sessizce eksik
+            # cikar. Hata verilmedigi icin fark edilmesi zor - uyar.
+            nd = getattr(self, "_num_disp", 256)
+            f_px = float(self.calib_data["P1"][0, 0])
+            b_mm = float(np.linalg.norm(self.calib_data["T"])) * 1000.0
+            z_min = f_px * b_mm / (nd - 1)
+            z_tepe = float(np.percentile(P[:, 2], 2))   # cismin en yakin ucu
+            uyari, renk = "", GREEN
+            if z_tepe < z_min * 1.05:
+                uyari = (f"  !! TEPESI KESIK OLABILIR: {z_tepe:.0f} mm, "
+                         f"sinir {z_min:.0f} mm (arama araligini buyut "
+                         f"veya kamerayi yukselt)")
+                renk = RED
+            elif z_tepe < z_min * 1.20:
+                uyari = f"  ! sinira yakin ({z_tepe:.0f} / {z_min:.0f} mm)"
+                renk = YELLOW
+
+            self.lbl_meas_en.config(text=f"{en:.1f}", fg=renk)
+            self.lbl_meas_boy.config(text=f"{boy:.1f}", fg=renk)
+            self.lbl_meas_yuk.config(text=f"{yuk:.1f}", fg=renk)
+            self.lbl_meas_status.config(
+                text=f"{nasil} | {len(aday)} aday | "
+                     f"{int(cisim.sum()):,} px | desi "
+                     f"{en*boy*yuk/3e6:.2f}{uyari}", fg=renk)
+            self._son_olcum = (en, boy, yuk)
+        except Exception as ex:
+            self.lbl_meas_status.config(text=f"Hata: {ex}", fg=RED)
+
     def _do_measure(self):
         if not self._ensure_calib_current():
             self.lbl_meas_status.config(text="Kalibrasyon yok!", fg=RED)
@@ -3445,8 +3758,14 @@ class CameraApp:
                 return
 
             Q = self.calib_data["Q"]
-            ground_n = self.ground_data["normal"].ravel()
-            ground_d = float(self.ground_data["d"])
+            g = self.ground_data
+            ground_n = np.asarray(g["normal"], np.float64).ravel()
+            # Duzlem ham cercevede kaydedildiyse rektifiye cerceveye cevir
+            # (bkz. _remove_ground - R1 farki 1.567 derece)
+            if (str(g["frame"]) if "frame" in g else "raw") != "rectified":
+                ground_n = np.asarray(self.calib_data["R1"],
+                                      np.float64) @ ground_n
+            ground_d = float(g["d"])
 
             pts_2d = contour.reshape(-1, 2)
             pts_3d = []
@@ -3473,9 +3792,13 @@ class CameraApp:
             proj_v = pts_3d @ v
             proj_n = pts_3d @ n
 
-            en = float(max(proj_u) - min(proj_u))
-            boy = float(max(proj_v) - min(proj_v))
-            yuk = float(max(proj_n) - min(proj_n))
+            # BIRIM: Q metre biriminde (kalibrasyon sq/1000 kullaniyor),
+            # dolayisiyla proj_* degerleri METREDIR. Etiketler ve kutu
+            # onerisi mm bekliyor - *1000 EKSIKTI. Belirtisi: 0.3 x 0.3
+            # x 0.2 "mm" gorunumu ve her cisme "Mini koli" onerisi.
+            en = float(max(proj_u) - min(proj_u)) * 1000.0
+            boy = float(max(proj_v) - min(proj_v)) * 1000.0
+            yuk = float(max(proj_n) - min(proj_n)) * 1000.0
             if en < boy:
                 en, boy = boy, en
 
