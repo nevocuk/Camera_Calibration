@@ -1,7 +1,7 @@
 # Stereo Kamera Projesi — Tam Kontext Dokumani
 
 > Bu dosya, projeye sifirdan baslayacak bir modelin hizlica tam resmi gorebilmesi icin yazildi.
-> Son guncelleme: 2026-08-16.
+> Son guncelleme: 2026-08-19.
 
 ---
 
@@ -55,6 +55,9 @@ Kamera Yakalama  →  Stereo Rektifikasyon  →  SGBM + WLS  →  reprojectImage
 | `src/box_output.py` | Kutu onerisi + RSC kesim yonergesi PDF uretimi. |
 | `src/ground_plane.py` | ChArUco ile zemin duzlemi (normal + d) tespiti. |
 | `src/depth_view.py` | Bagimsiz derinlik goruntuleyici (3 pencere, Z=f*B/d formulu). |
+| `src/kutu_gorsel.py` | **Dogrulama gorseli** — goruntu uzerine renk kodlu 3B kutu + iki nokta bulutu paneli. `--zemin` ile zemin cikarilmis haritadan olcer ve kesilen tabani geri ekler. |
+| `src/tikla_olc.py` | CLI tiklayarak olcum (PCA kutusu). |
+| `src/cisim_olc.py` | Kayitli cekimden duzlem tabanli boyut olcumu. |
 
 ### Yardimci scriptler
 | Dosya | Ne yapar |
@@ -65,6 +68,7 @@ Kamera Yakalama  →  Stereo Rektifikasyon  →  SGBM + WLS  →  reprojectImage
 | `src/mono_verify.py` | Tekli kalibrasyon dogrulama |
 | `src/test_charuco.py`, `charuco_debug.py`, `detect_test.py` | ChArUco tespit debug araclari |
 | `src/sistem_planlama.py` | Teorik derinlik belirsizligi ve calisma zarfi hesaplama |
+| `src/pozlama_teshis.py`, `goruntu_ayar_teshis.py` | Pozlama ve goruntu ayari taramasi (gercek kare parlakligi olculur) |
 
 ### Veri ve konfigürasyon
 | Dosya | Icerik |
@@ -113,6 +117,62 @@ cv2.normalize ile parlaklik esleme denendi, tum piksel degerlerini mean±std ara
 | 384 | 265 mm |
 
 Yani 256 ile 40 cm'den yakin cisim olculemez. Hesaplama tabindaki `Z_min` varsayilani 300 mm — bu deger **ulasilamaz**, 400 mm'nin altina inmek icin numDisparities 384'e cikarilmali (daha yavas + %18.75 olu kenar).
+
+### Zemin duzlemi REKTIFIYE cercevede cozulur (2026-08-19)
+`reprojectImageTo3D` ciktisi rektifiye cercevede, ama duzlem eskiden
+`solvePnP(K1, D1, ham goruntu)` ile HAM cercevede cozuluyordu. Aradaki
+R1 rotasyonu **1.567 derece**; 200 mm yanal uzaklikta **4.96 mm**
+yukseklik hatasi. Artik solvePnP rektifiye goruntude, intrinsik
+`P1[:3,:3]`, distorsiyon sifir ile calisiyor ve dosyaya
+`frame="rectified"` yaziliyor. Eski dosyalar okunurken `R1 @ n` ile
+cevriliyor. Planar poz belirsizligi icin `SOLVEPNP_IPPE` +
+`solvePnPGeneric` ile iki cozum alinip derinlik uyumuna gore secilir.
+
+### Zemin cikarma esigi bir DUZLEM OTELEMESIDIR (2026-08-19)
+`esik (mm)` boyut filtresi degil. Kesme duzlemi masadan `esik` kadar
+yukari tasinir, **altinda kalan her sey** silinir — cisim masada
+durdugu icin cismin alt `esik` kadari da gider. Kaybi `kutu_gorsel.py
+--zemin` icindeki **taban geri kazanimi** olcup geri ekler: bolgenin
+duzleme en yakin noktasi `h_alt` kadar yukaridadir, duzlem normaline
+en hizali ana eksende `delta = h_alt / |v . n|` kadar uzatilir.
+
+### Olcum icin zemin cikarma: dogruluk degil DUYARSIZLIK (2026-08-19)
+Termos (gercek 250 x 72 x 36 mm), `q_20260819_170641`, tikla (1373,1045):
+
+| tol | HAM (kisitsiz) | ZEMIN CIKARILMIS (kisitsiz) |
+|---|---|---|
+| 12 mm | 194 x 77 | 194 x 77 |
+| 20 mm | **390 x 343** | **210** x 78 |
+| 60 mm | **422 x 304** | **210** x 96 |
+
+Dar toleransta iki harita birebir ayni. Tolerans buyuyunce ham harita
+masaya tasiyor, zemin cikarilmis harita sabit kaliyor — sizinti
+fiziksel olarak imkansiz. Taban geri kazanimiyla sonuc
+**250.4 x 67.5 mm** (uzun kenarda %0.2 hata) ve tol 20-60 arasi
+253.9 / 253.8 / 253.9 — **ayara duyarsiz**. Rapor icin dogruluktan
+degerli, cunku sonuc parametre secimiyle oynamiyor.
+
+**Varsayilan degismedi** (ham harita); yeni davranis `--zemin` bayragi
+ve Olcum tabindaki "zemin haritasi" kutucugu ile secilir.
+
+### Tiklayarak olcumde uc kisit (2026-08-19)
+Derinlik surekliligi tek basina cismi masadan ayirmiyor (tabanda
+derinlik sicramasi yok). Sirasiyla:
+1. **Mesafeye gore olceklenen tolerans** — `dd = f*B*dZ/Z^2`.
+   Sabit disparity toleransi yanlis: 6 px, 730 mm'de 63 mm, 1750 mm'de
+   365 mm derinlik kapsiyor (5.8 kat).
+2. **Parlaklik kisiti** — tohumun gri degerinden sapan pikseller
+   elenir. Olculdu: kisit yok 340x272, 45 -> 262x78, 25 -> 258x70.
+3. **Kenar engeli** — Gauss + Sobel buyuklugu esigin ustundeki
+   pikseller sifirlanir; bolge nesne sinirini asamaz. Parlaklik
+   kisitinin gevsetilmesine izin verir.
+
+### Yuvarlak cisimlerde cap duzeltmesi (2026-08-19)
+Silindirik cisimde tek kameradan **on yay** gorunur; PCA kutusunun en
+kisa ekseni gercek capin cok altinda cikar (11-28 mm olculdu, gercek
+36 mm). `_yuvarlak_mi` cember uydurmasiyla (Kasa yontemi) tespit eder:
+kalinti/yaricap < 0.06 ve yaricap < 0.60 x uzun kenar. Duzlem acisi
+60 dereceyi asiyorsa duzeltme uygulanmaz (yay cok kisa).
 
 ### Kaliteli Tek Kare (F modu) vs canli derinlik
 Canli derinlik ~3-5 fps, her frame farkli gurultu. Kaliteli kare: 10 farkli frame'in gray ortalamasini alarak sensor gurultusunu azaltir, sonra ayri (daha buyuk blockSize=9, daha yuksek WLS lambda=12000) SGBM ile isler. Sonuc daha temiz disparity haritasi. Hash-based frame change detection ile ayni frame'i tekrar almaz.
@@ -196,6 +256,48 @@ Ornek: bir cekimde blockSize=9/λ=12000 → 213.9 px (476 mm), blockSize=7/λ=80
 2. Yuksek disparity (256'lik arama araliginin ust ucu) + yakin cisimde perspektif farki eslemeyi zorlastiriyor.
 
 **Ayirt etmek icin kontrollu test gerekli:** duz, dokulu bir hedefi (doku deseni kagidi) tam merkeze, bilinen mesafeye koy; ROI tek yuzeyde kalsin. Fark kaybolursa neden (1), surerse neden (2).
+
+### Zemin cikarma yalnizca tahtanin civarinda guvenilir (2026-08-19)
+Duzlem ~600 mm'de ~200 mm'lik bir tahtadan cikariliyor, sonra tum
+sahneye uzatiliyor. `q_20260819_165521` uzerinde olculdu (duzlem
+79.9 derece, bagimsiz RANSAC ile **1.6 derece** uyum — yani duzlem
+dogru):
+
+| | Oran |
+|---|---|
+| Duzlem uzerinde (h < 15 mm) | **%11.7** |
+| esik 12 mm ile atilan | %26.9 |
+| Kalan | %73.1 |
+
+Cerceve genisken masa sahnenin ancak %12'si; duvar/raf/oda gercekten
+duzlemin uzerinde (h medyani %50'de 85 mm, %90'da 866 mm) ve dogru
+sekilde korunuyor. Ayrica ekstrapolasyon hatasi: **1 derecelik fit
+hatasi 2000 mm'de 35 mm** yukseklik hatasi yapar, 12 mm'lik esigin
+uc kati; uzak yamalar duzlemin bazen ustune bazen altina duser.
+
+**Kural:** zemin cikarma tespit tahtasinin +-300-400 mm civarinda
+guvenilir, genis sahnede bir sey izole etmez. Tiklayarak olcum bundan
+bagimsiz calisir (tohum etrafinda ayrica 250 mm'lik 3B uzaklik siniri
+uygular).
+
+### Kutu gorseli varsayilan olarak HAM haritayi okur (2026-08-19)
+`kutu_gorsel.py` varsayilan olarak `disparity_ham` anahtarini kullanir.
+Yani Derinlik tabindaki "Zemin/masa cikar" kutucugu ekrandaki haritayi
+degistirir ama **kutu gorseline girmez**. Bu bir kez yanlis nedene
+baglandi ("esigi 50 yapinca duzeldi" — aslinda tolerans/parlaklik
+ayarindan geliyordu). Zemin cikarilmis haritayi kullanmak icin
+`--zemin` bayragi / "zemin haritasi" kutucugu gerekir.
+
+### Egik bakis: cismi destek yuzeyinden ayirmak zor (2026-08-19)
+Kamera masaya ~80 derece ile bakiyor. Sonuclari:
+- Yukseklik gozlenebilirligi `cos(aci)` = **0.177**
+- Blok esleme egimle bozulur: `dd/dx = B*tan(aci)/Z`, 79.8 derecede
+  7 px'lik blok boyunca **3.99 px** disparity degisimi
+- Derinlik tek basina cisimle masayi ayiramaz (tabanda sicrama yok)
+
+Parlaklik + kenar kisitlari bunun cogunu kurtariyor ama cisim koyu bir
+zeminde (orn. laptop) dururken yukseklikte ~%16 tasma kaliyor.
+60 derecelik kati kural **uyariya** cevrildi (kamera tasinamiyor).
 
 ### Crosshair hizalama sorunu (cozuldu ama dikkat gerekli)
 Goruntu merkezindeki olcum noktasi cismin uzerine denk gelmeyebilir. Tiklayarak olcum eklendi ama kullanici bunu bilmeli. Ozellikle:
@@ -461,6 +563,28 @@ Uygulama md>0 secilince uyari gosterir ve pencerenin uzak ucunda
 yigilma (%10+) tespit ederse cekim satirinda "SAHNE ARALIK DISINA
 TASIYOR" yazar.
 
+### Bolgedeki baskin duzlemi RANSAC ile atma (2026-08-19)
+**Ne oldu:** Cismi destek yuzeyinden ayirmak icin segmentlenen bolgede
+RANSAC ile duzlem arandi ve atildi. RANSAC bolgenin **%69-100'unu**
+duzlem bulup cismi sildi.
+**Teknik neden:** Bolge zaten ince bir derinlik dilimi, yani **kendisi
+duzlemsel**. Ayirmak istedigimiz iki sey de ayni kriteri sagliyor.
+**Sonuc:** Varsayilan KAPALI. Ayrica tohum duzlemin uzerinde kalinca
+kod sessizce en buyuk bilesene dusuyordu ve bu **masa kenarini olcup
+termos diye raporlamisti**; artik "TIKLANAN NOKTA DESTEK YUZEYINDE"
+hatasi verir.
+
+### Aday bolgeleri "beklenen olcuye sayisal yakinlik" ile secmek
+**Ne oldu:** Birden fazla tohum denenip sonuclar termosun bilinen
+olculerine yakinliga gore puanlandi; en iyi puanli 234x55x39 secilip
+"termos olculdu" diye sunuldu. **Gercekte masa kenariydi.**
+**Teknik neden:** Beklenen cevaba yakinlik, dogru seyi olctugunun
+kaniti degil — yanlis bir bolge de tesadufen yakin sayi uretebilir.
+**Dogru yontem:** `kutu_gorsel.py` ile kutuyu goruntu uzerine ciz;
+kutu cismi sariyorsa dogru, cevreye tasiyorsa bolge kacmis.
+**Bu yuzden renk kodu eklendi:** her ana eksenin kenarlari ve sol
+ustteki olcusu ayni renkte (UZUN yesil, ORTA acik mavi, KISA pembe).
+
 ### Dokusuz yuzeyler
 SGBM blok esleme tabanli — tekrar eden veya tamamen duz yuzeyler (beyaz duvar, parlak metal, cam) icin disparity uretemiyor. `patterns/sgbm_doku_desenleri_v2.pdf` bu amacla basildi: cismin uzerine veya arkasina doku deseni konularak esleme kalitesi artirilabilir.
 
@@ -489,27 +613,31 @@ Kalibrasyon oda sicakliginda yapilir. Ciddi sicaklik degisimi (15°C+) lens ve g
 - [x] Mesafe dogrulama (V tusu) — gercek vs olculen karsilastirma + CSV kayit
 - [x] Preprocessing: CLAHE + istatistiksel parlaklik esleme + GaussianBlur
 - [x] Temporal median (5 frame) canli modda stabilite
+- [x] Tiklayarak PCA olcumu (duzlemsiz) — tolerans/parlaklik/kenar kisitli
+- [x] Duzlemle olcum + taban geri kazanimi + yuvarlak cisim duzeltmesi
+- [x] Kutu gorseli (`kutu_gorsel.py`) — renk kodlu 3B kutu + nokta bulutu
+- [x] Zemin duzlemi uygulama icinde tespit (rektifiye cercevede)
+- [x] Set yedekleme/geri yukleme (`Yeni Set Baslat`) — gidis-donus test edildi
+- [x] Arayuz: kaydirilabilir tablar, katlanabilir bolumler, zoom + tiklama
 
-### Commit edilmemis degisiklikler (2026-08-16)
-`camera_test.py` uzerinde kapsamli degisiklikler var, henuz commit edilmedi:
-- Kaliteli tek kare modu (F tusu)
-- Tiklayarak olcum
-- Mesafe dogrulama (V tusu)
-- Preprocessing iyilestirmeleri (CLAHE, brightness matching)
-- Disparity yuzde hesaplamasi duzeltmesi (%87.5 sabiti → gercek)
-- Sag panel grayscale disparity (renkliden gecis)
-- Rehber tabina kisayollar eklenmesi
-- Hesaplama tabi f_piksel auto-populate (kalibrasyondan)
+### Kalibrasyon sinirlayici etken DEGIL (2026-08-19 olculdu)
+44 cift / 3264 kose uzerinde epipolar hata **0.420 px**. RMS tabani
+~0.44 px ve bu **kose lokalizasyon gurultusu** — kare atarak RMS
+dusuruluyor ama epipolar hata **kotulesiyor**. Distorsiyon modelini
+buyutmek de fayda vermedi. Mevcut olcum hatalarinin kaynagi
+kalibrasyon degil; goruntu geometrisi (egik bakis) ve segmentasyon.
+Olcumun kendi oturma sacilimi ~%4.3.
 
 ### Sirada ne var
-1. **Commit**: Mevcut degisiklikleri kaydet
-2. **Dogrulama testleri** (rapor icin):
+1. **Dogrulama testleri** (rapor icin):
    - Mesafeye gore hata egrisi (5.2) — en az 4 farkli mesafede
    - Tekrarlanabilirlik testi (5.3) — ayni mesafede 10 olcum, std sapma
    - Calisma zarfi (5.4) — minimum/maksimum mesafe
    - Ana sonuc tablosu (5.9) — 5 cisim x 3 boyut
-3. **Fiziksel dogrulama** (5.10) — kesim yonergesiyle kutu
-4. **Rapor yazimi** (Ek-4 docx sablonu)
+2. **Fiziksel dogrulama** (5.10) — kesim yonergesiyle kutu
+3. **Rapor yazimi** (Ek-4 docx sablonu)
+4. **Desen olcusunu kumpasla dogrula** — 5 kare olcup 5'e bol
+   (`charuco_config.json`'daki 20.0 mm bu sekilde teyit edilmeli)
 
 ---
 
@@ -617,6 +745,20 @@ Dusuk isik/dokusuz ortamda yaniltici sonuc veriyor (bolum 5). SIFT + ratio test 
 
 ### Mesafe olcumunde goruntu merkezini varsaymak
 Cisim merkezde olmayabilir — arka plan mesafesi okunur. Tiklayarak olcum kullan veya cismi kesinlikle merkeze hizala.
+
+### Olcumu "beklenen degere yakinlik" ile dogrulama
+Yanlis bir bolge de tesadufen dogru sayilar uretebilir; bu bir kez
+masa kenarini termos diye raporlatti. Dogrulama `kutu_gorsel.py`
+ciktisinda kutunun cismi sarmasidir.
+
+### Zemin cikarmayi "arka plani siler" diye kullanma
+Yalnizca destek yuzeyini siler. Genis sahnede duvar/raf/oda gercekten
+duzlemin uzerindedir ve dogru sekilde korunur (olculdu: sahnenin
+%11.7'si duzlem uzerinde, %73.1 kaliyor).
+
+### RANSAC "masayi at" secenegini varsayilan acma
+Bolge zaten ince bir derinlik dilimi, yani duzlemsel; RANSAC cismi de
+siler (bolgenin %69-100'unu duzlem bulur).
 
 ### Lens odagina dokunduktan sonra eski kalibrasyonu kullanma
 Odak degisirse tum intrinsic parametreler gecersiz olur. Yeniden kalibrasyon sart.
