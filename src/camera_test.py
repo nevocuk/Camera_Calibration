@@ -1477,7 +1477,18 @@ class CameraApp:
         # %69-100 "duzlem" buluyor ve cismin kendisini siliyor; termosun
         # tam merkezine tiklandiginda bile "destek yuzeyinde" diyor.
         # Fikir yalnizca bolge derinlikce kalin oldugunda anlamli.
+        self.pca_gri_var = tk.IntVar(value=35)
         self.pca_duzlem_var = tk.BooleanVar(value=False)
+        # Kutu gorselini ZEMIN CIKARILMIS haritadan uret. Olculdu
+        # (q_20260819_170641, termos 250x72x36, tikla 1373,1045):
+        #   ham harita     tol 20 -> 263x68 | tol 60 -> 263x70
+        #                  parlaklik kisiti kapaliyken 362x324 (masaya kacti)
+        #   zemin haritasi tol 20 -> 254x68 | tol 60 -> 254x70
+        #                  parlaklik kisiti kapaliyken bile 254x69
+        # Zemin cikarma bolgenin masaya sizmasini FIZIKSEL olarak
+        # engelledigi icin sonuc tol/parlaklik ayarina duyarsiz kaliyor.
+        # Esigin kestigi taban bandi duzleme kadar uzatilarak geri eklenir.
+        self.pca_zemin_var = tk.BooleanVar(value=False)
         tk.Button(btn_row, text="Tiklayarak olc (duzlemsiz)",
                   command=self._measure_click_pca,
                   bg="#6a4d1a", fg="white", font=("Segoe UI", 10, "bold"),
@@ -1493,6 +1504,12 @@ class CameraApp:
                    textvariable=self.pca_tol_var, bg=BG, fg=FG,
                    buttonbackground=BORDER, relief="flat",
                    font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        tk.Label(btn_row2, text="gri tol:", bg=CARD, fg=MUTED,
+                 font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(6, 2))
+        tk.Spinbox(btn_row2, from_=0, to=120, increment=5, width=4,
+                   textvariable=self.pca_gri_var, bg=BG, fg=FG,
+                   buttonbackground=BORDER, relief="flat",
+                   font=("Segoe UI", 9)).pack(side=tk.LEFT)
         tk.Label(btn_row2, text="sinir mm:", bg=CARD, fg=MUTED,
                  font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(6, 2))
         tk.Spinbox(btn_row2, from_=80, to=800, increment=25, width=5,
@@ -1503,6 +1520,11 @@ class CameraApp:
                        bg=CARD, fg=FG, selectcolor=BG, activebackground=CARD,
                        activeforeground=FG, font=("Segoe UI", 8)
                        ).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Checkbutton(btn_row2, text="zemin haritasi",
+                       variable=self.pca_zemin_var,
+                       bg=CARD, fg=FG, selectcolor=BG, activebackground=CARD,
+                       activeforeground=FG, font=("Segoe UI", 8)
+                       ).pack(side=tk.LEFT, padx=(4, 0))
         tk.Button(btn_row2, text="Kutu gorseli",
                   command=self._save_box_visual,
                   bg="#4a2d6a", fg="white", font=("Segoe UI", 10, "bold"),
@@ -3935,7 +3957,9 @@ class CameraApp:
                  "--dosya", os.path.basename(kayit[-1]),
                  "--nokta", f"{int(sx)},{int(sy)}",
                  "--sinir", str(self.pca_sinir_var.get()),
-                 "--tol", str(self.pca_tol_var.get())],
+                 "--tol", str(self.pca_tol_var.get()),
+                 "--gri", str(self.pca_gri_var.get())]
+                + (["--zemin"] if self.pca_zemin_var.get() else []),
                 capture_output=True, text=True, timeout=90)
             cikti = (r.stdout or "") + (r.stderr or "")
             ad = ""
@@ -4062,12 +4086,31 @@ class CameraApp:
             tol = (f_px0 * B_mm0 * tol_mm / (Z0 * Z0)
                    if np.isfinite(Z0) and Z0 > 0 else 6.0)
             tol = float(max(0.5, min(tol, 40.0)))
+            # PARLAKLIK OLCUTU: derinlik tek basina cismi destek
+            # yuzeyinden ayirmiyor - tabanda derinlik sicramasi yok ve
+            # o pikseller WLS uydurmasi DEGIL, gercek olcum (olculdu:
+            # kacan bolgede ham eslesme %100). Ama cisim ile yuzeyin
+            # RENGI genelde farkli. Olculdu (koyu termos / beyaz masa):
+            #   gri tolerans yok -> 340x272 mm  (masaya kacmis)
+            #   45 -> 262x78 | 35 -> 262x76 | 25 -> 258x70
+            #   gercek 250x72x36  => hata %3
+            # Cisim ile yuzey ayni renkteyse ise yaramaz; 0 = kapali.
+            calis_dsp = dsp
+            gri_tol = float(self.pca_gri_var.get())
+            gri_kaynak = getattr(self, "_quality_gray_l", None)
+            if gri_tol > 0 and gri_kaynak is not None                     and gri_kaynak.shape == dsp.shape:
+                fark = np.abs(gri_kaynak.astype(np.float32)
+                              - float(gri_kaynak[sy, sx]))
+                calis_dsp = dsp.copy()
+                calis_dsp[fark > gri_tol] = 0
+                if calis_dsp[sy, sx] <= 0:
+                    calis_dsp = dsp          # tohum elendi, filtreyi atla
             m0 = np.zeros((H + 2, W + 2), np.uint8)
-            im = dsp.astype(np.float32).copy()
+            im = calis_dsp.astype(np.float32).copy()
             cv2.floodFill(im, m0, (sx, sy), 0, loDiff=tol, upDiff=tol,
                           flags=(8 | cv2.FLOODFILL_MASK_ONLY
                                  | cv2.FLOODFILL_FIXED_RANGE | (255 << 8)))
-            m = m0[1:-1, 1:-1].astype(bool) & (dsp > 0)
+            m = m0[1:-1, 1:-1].astype(bool) & (calis_dsp > 0)
             if m.mean() > 0.25:
                 self.lbl_meas_status.config(
                     text=(f"Bolge kareye tasti (%{m.mean()*100:.0f}) - "
@@ -4126,7 +4169,8 @@ class CameraApp:
             self.lbl_meas_en.config(text=f"{b[2]:.1f}", fg=GREEN)
             self.lbl_meas_status.config(
                 text=(f"DUZLEMSIZ (PCA) | {nasil} | {int(ok.sum()):,} px | "
-                      f"Z={np.median(P[:, 2]):.0f} mm{duz_not} | tol {tol:.1f} px | "
+                      f"Z={np.median(P[:, 2]):.0f} mm{duz_not} | tol {tol:.1f} px"
+                      f"{f', gri {gri_tol:.0f}' if gri_tol > 0 else ''} | "
                       f"kisa kenar CISMIN GORUNEN yuzunun kalinligidir, "
                       f"arka yuz olculemez"), fg=GREEN)
             self._son_olcum = (b[0], b[1], b[2])
