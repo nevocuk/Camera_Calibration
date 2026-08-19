@@ -16,6 +16,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import threading
+import glob
 import subprocess
 import sys
 import time
@@ -207,6 +208,11 @@ class CameraApp:
         self._display_scale = 1.0
         self._display_fl_w = 0
         self._display_fl_h = 0
+        self._display_off_x = 0.0
+        self._display_off_y = 0.0
+        self._zoom = 1.0          # goruntu yakinlastirma
+        self._zoom_c = None       # yakinlastirma merkezi (birlesik koord)
+        self._zoom_crop = (0, 0)  # kirpma sol-ust kosesi
         self._pre_ground_dsp = None
         self._son_olcum = None
         self._bekleyen = {}
@@ -238,6 +244,8 @@ class CameraApp:
         self.cam_label = tk.Label(cam_container, bg="#000")
         self.cam_label.pack(fill=tk.BOTH, expand=True)
         self.cam_label.bind("<Button-1>", self._on_cam_click)
+        self.cam_label.bind("<MouseWheel>", self._on_cam_wheel)
+        self.cam_label.bind("<Double-Button-1>", self._on_cam_double)
 
         # Status bar
         self.status_bar = tk.Label(cam_container, text="", bg=CARD, fg=FG,
@@ -280,14 +288,99 @@ class CameraApp:
         self._build_tab_status()
         self._build_tab_guide()
 
-    def _section(self, parent, title):
+    def _kaydirilabilir(self, tab):
+        """Sekmeyi kaydirilabilir yap; icerik cercevesini dondur.
+
+        Tekerlek baglantisi <Enter>/<Leave> ile bind_all uzerinden
+        yapilir. Yalnizca canvas ve ic cerceveye baglamak YETMIYOR:
+        fare bir butonun/etiketin uzerindeyken olay o widget'a gidiyor
+        ve kaydirma calismiyor ("bazi yerlerde scroll yok" sikayeti).
+        bind_all, imlec sekmenin herhangi bir yerindeyken calisir.
+        """
+        canvas = tk.Canvas(tab, bg=CARD, highlightthickness=0)
+        cubuk = tk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+        sf = tk.Frame(canvas, bg=CARD)
+        sf.bind("<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=sf, anchor="nw", tags="sf")
+        canvas.configure(yscrollcommand=cubuk.set)
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfig("sf", width=e.width))
+        cubuk.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        def tekerlek(e):
+            # Icerik sigiyorsa kaydirma - yoksa sayfa titrer
+            ilk, son = canvas.yview()
+            if ilk <= 0.0 and son >= 1.0:
+                return
+            canvas.yview_scroll(-1 * (e.delta // 120), "units")
+
+        def gir(_=None):
+            canvas.bind_all("<MouseWheel>", tekerlek)
+
+        def cik(_=None):
+            canvas.unbind_all("<MouseWheel>")
+
+        for w in (canvas, sf):
+            w.bind("<Enter>", gir)
+            w.bind("<Leave>", cik)
+        return sf
+
+    def _section(self, parent, title, katlanabilir=False, acik=True):
+        """Bolum basligi + icerik cercevesi.
+
+        katlanabilir=True ise baslik tiklanabilir olur ve icerik
+        gizlenebilir. Nadiren degistirilen ayarlar gorunumu doldurmaz.
+
+        DIKKAT: icerik cercevesinin MASTER'i sarmalayicidir. Once
+        parent'a bagli bir cerceve yapip `pack(in_=sarmal)` demek
+        calismiyor - Tk widget'i sarmalayicinin ARKASINA cizer; yer
+        kaplar ama gorunmez. (winfo_ismapped() yine True doner, yani
+        "haritalanmis" testi bu hatayi yakalamaz.)
+        """
         f = tk.Frame(parent, bg=CARD)
         f.pack(fill=tk.X, padx=8, pady=(10, 0))
-        tk.Label(f, text=title, bg=CARD, fg=ACCENT,
-                 font=("Segoe UI", 11, "bold")).pack(anchor="w")
+
+        if not katlanabilir:
+            tk.Label(f, text=title, bg=CARD, fg=ACCENT,
+                     font=("Segoe UI", 11, "bold")).pack(anchor="w")
+            tk.Frame(f, bg=BORDER, height=1).pack(fill=tk.X, pady=(4, 0))
+            content = tk.Frame(parent, bg=CARD)
+            content.pack(fill=tk.X, padx=8, pady=(4, 0))
+            return content
+
+        durum = {"acik": acik}
+        lbl = tk.Label(f, text="", bg=CARD, fg=ACCENT, cursor="hand2",
+                       font=("Segoe UI", 11, "bold"))
+        lbl.pack(anchor="w")
         tk.Frame(f, bg=BORDER, height=1).pack(fill=tk.X, pady=(4, 0))
-        content = tk.Frame(parent, bg=CARD)
-        content.pack(fill=tk.X, padx=8, pady=(4, 0))
+
+        # Sarmalayici hep pakette -> bolumun sekmedeki YERI sabit kalir.
+        sarmal = tk.Frame(parent, bg=CARD)
+        sarmal.pack(fill=tk.X)
+        content = tk.Frame(sarmal, bg=CARD)      # MASTER = sarmal
+
+        def ciz():
+            lbl.config(text=("\u25be  " if durum["acik"] else "\u25b8  ") + title)
+            if durum["acik"]:
+                content.pack(fill=tk.X, padx=8, pady=(4, 0))
+                sarmal.pack_propagate(True)  # boyut cocuktan gelsin
+            else:
+                content.pack_forget()
+                # Tk cercevesi cocuklari kaldirilinca ISTENEN
+                # boyutunu KORUR (olculdu: reqheight 105'te
+                # kaliyor). Bosaltmak yetmiyor, yukseklik
+                # acikca sifirlanmali - yoksa kapali bolum
+                # kocaman bir bosluk birakiyor.
+                sarmal.configure(height=1)
+
+        def degistir(_=None):
+            durum["acik"] = not durum["acik"]
+            ciz()
+
+        lbl.bind("<Button-1>", degistir)
+        ciz()
         return content
 
     @staticmethod
@@ -314,17 +407,7 @@ class CameraApp:
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Ayarlar  ")
 
-        canvas = tk.Canvas(tab, bg=CARD, highlightthickness=0)
-        scrollbar = tk.Scrollbar(tab, orient="vertical", command=canvas.yview)
-        sf = tk.Frame(canvas, bg=CARD)
-        sf.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=sf, anchor="nw", tags="sf")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig("sf", width=e.width))
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sf.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
-        canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
+        sf = self._kaydirilabilir(tab)
 
         # Cozunurluk
         c = self._section(sf, "Cozunurluk / Format")
@@ -483,17 +566,7 @@ class CameraApp:
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Hesaplama  ")
 
-        canvas = tk.Canvas(tab, bg=CARD, highlightthickness=0)
-        scrollbar = tk.Scrollbar(tab, orient="vertical", command=canvas.yview)
-        sf = tk.Frame(canvas, bg=CARD)
-        sf.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=sf, anchor="nw", tags="sf")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig("sf", width=e.width))
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sf.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
-        canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
+        sf = self._kaydirilabilir(tab)
 
         c = self._section(sf, "Calisma mesafesi")
         # Z min varsayilani 300'du ama sistem numDisparities=256 ile
@@ -598,6 +671,7 @@ class CameraApp:
     def _build_tab_calibration(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Kalibrasyon  ")
+        tab = self._kaydirilabilir(tab)
 
         cfg = self.charuco_cfg
         btype = cfg.get("board_type", "charuco")
@@ -937,32 +1011,62 @@ class CameraApp:
         self.lbl_set_info.config(text=" | ".join(parts))
 
     def _new_calib_set(self):
+        """Aktif kareleri yedekle ve frames/ klasorunu bosalt.
+
+        Yedege kareler + calib_result.npz + charuco_config.json +
+        camera_settings.json birlikte konur. Desen tanimi (ozellikle
+        OLCULEN kare boyutu) olmadan eski kareler yeniden islenemez -
+        yalnizca fotograf yedeklemek geri donusu imkansiz kilar.
+        """
         current = len([f for f in os.listdir(FRAMES_DIR) if f.startswith("L_")])
         if current == 0:
-            self.lbl_set_info.config(text="Aktif sette kare yok, yedeklenecek bir sey yok")
+            self.lbl_set_info.config(
+                text="Aktif sette kare yok, yedeklenecek bir sey yok")
             return
         calib_dir = os.path.dirname(FRAMES_DIR)
-        existing = [d for d in os.listdir(calib_dir) if d.startswith("frames_set_")]
-        next_num = len(existing) + 1
-        set_name = f"frames_set_{next_num}"
-        if not messagebox.askyesno("Yeni Set",
+        # Isim CATISMASIZ uretilmeli: len(existing)+1 kullanmak, aradan
+        # bir set silinmisse var olan bir klasoru hedef gosterir ve
+        # copytree FileExistsError ile coker.
+        damga = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        taban = f"frames_set_{damga}_{self.current_w}x{self.current_h}"
+        set_name, k = taban, 2
+        while os.path.exists(os.path.join(calib_dir, set_name)):
+            set_name = f"{taban}_{k}"
+            k += 1
+        if not messagebox.askyesno(
+                "Yeni Set",
                 f"Mevcut {current} kare '{set_name}' olarak yedeklenecek.\n"
+                f"Kareler + kalibrasyon + desen tanimi + kamera ayarlari.\n"
                 f"Aktif frames/ klasoru bosaltilacak.\n\nDevam?"):
             return
         import shutil
         dest = os.path.join(calib_dir, set_name)
         shutil.copytree(FRAMES_DIR, dest)
-        if os.path.exists(CALIB_PATH):
-            shutil.copy2(CALIB_PATH, os.path.join(dest, "calib_result.npz"))
+        for kaynak, ad in ((CALIB_PATH, "calib_result.npz"),
+                           (CONFIG_PATH, "charuco_config.json"),
+                           (SETTINGS_PATH, "camera_settings.json")):
+            if os.path.exists(kaynak):
+                shutil.copy2(kaynak, os.path.join(dest, ad))
+        with open(os.path.join(dest, "SET_BILGI.txt"), "w",
+                  encoding="utf-8") as f:
+            f.write(f"Yedek tarihi : {damga}\n"
+                    f"Kare sayisi  : {current} cift\n"
+                    f"Cozunurluk   : {self.current_w}x{self.current_h}\n"
+                    f"Icerik       : kareler, calib_result.npz,\n"
+                    f"               charuco_config.json, "
+                    f"camera_settings.json\n"
+                    f"Geri yukleme : Kalibrasyon tabi > 'Eski Seti Yukle'\n")
         for f in os.listdir(FRAMES_DIR):
             os.remove(os.path.join(FRAMES_DIR, f))
         self.save_count = 0
         self.lbl_saved.config(text="0 cift")
         self._update_set_info()
         self.lbl_set_info.config(
-            text=f"{set_name} olarak yedeklendi (kareler + kalibrasyon)", fg=GREEN)
+            text=f"{set_name} olarak yedeklendi "
+                 f"(kareler + kalibrasyon + desen + ayarlar)", fg=GREEN)
 
     def _load_calib_set(self):
+        """Yedeklenmis seti geri yukle - kareler VE kalibrasyon/desen."""
         calib_dir = os.path.dirname(FRAMES_DIR)
         sets = sorted([d for d in os.listdir(calib_dir)
                        if d.startswith("frames_set_") and
@@ -972,28 +1076,54 @@ class CameraApp:
             return
         import shutil
         from tkinter import simpledialog
-        choice = simpledialog.askstring("Set Yukle",
+        choice = simpledialog.askstring(
+            "Set Yukle",
             f"Mevcut setler: {', '.join(sets)}\n\n"
-            f"Yuklemek istedigin set adini yaz:\n"
-            f"(ornek: {sets[-1]})")
+            f"Yuklemek istedigin set adini yaz:\n(ornek: {sets[-1]})")
         if not choice or choice not in sets:
             return
         current = len([f for f in os.listdir(FRAMES_DIR) if f.startswith("L_")])
         if current > 0:
-            if not messagebox.askyesno("Uyari",
-                    f"Aktif sette {current} kare var.\n"
-                    f"Ustune yazilacak. Devam?"):
+            if not messagebox.askyesno(
+                    "Uyari",
+                    f"Aktif sette {current} kare var.\nUstune yazilacak. "
+                    f"Devam?"):
                 return
+        src = os.path.join(calib_dir, choice)
+        # Aktif kalibrasyon/desen de degisecek - once ONLARI yedekle,
+        # yoksa geri donus yolu kalmaz.
+        onc = os.path.join(calib_dir, "_oncekiler")
+        os.makedirs(onc, exist_ok=True)
+        for yol, ad in ((CALIB_PATH, "calib_result.npz"),
+                        (CONFIG_PATH, "charuco_config.json")):
+            if os.path.exists(yol):
+                shutil.copy2(yol, os.path.join(onc, ad))
+
         for f in os.listdir(FRAMES_DIR):
             os.remove(os.path.join(FRAMES_DIR, f))
-        src = os.path.join(calib_dir, choice)
+        geri = []
         for f in os.listdir(src):
-            shutil.copy2(os.path.join(src, f), FRAMES_DIR)
-        self.save_count = len([f for f in os.listdir(FRAMES_DIR) if f.startswith("L_")])
+            kaynak = os.path.join(src, f)
+            if not os.path.isfile(kaynak):
+                continue
+            if f == "calib_result.npz":
+                shutil.copy2(kaynak, CALIB_PATH); geri.append("kalibrasyon")
+            elif f == "charuco_config.json":
+                shutil.copy2(kaynak, CONFIG_PATH); geri.append("desen")
+            elif f == "SET_BILGI.txt" or f == "camera_settings.json":
+                continue                      # bilgi/ayar dosyasi, kopyalanmaz
+            else:
+                shutil.copy2(kaynak, FRAMES_DIR)
+        self.save_count = len([f for f in os.listdir(FRAMES_DIR)
+                               if f.startswith("L_")])
         self.lbl_saved.config(text=f"{self.save_count} cift")
+        self._load_calib_data()               # bellege yeniden yukle
         self._update_set_info()
+        ek = (" + " + ", ".join(geri)) if geri else ""
         self.lbl_set_info.config(
-            text=f"{choice} yuklendi ({self.save_count} cift)", fg=GREEN)
+            text=f"{choice} yuklendi ({self.save_count} cift{ek}). "
+                 f"Onceki kalibrasyon/desen 'calibration/_oncekiler' "
+                 f"klasorunde.", fg=GREEN)
 
     def _run_calibration(self):
         frame_count = len([f for f in os.listdir(FRAMES_DIR) if f.startswith("L_")])
@@ -1056,6 +1186,7 @@ class CameraApp:
     def _build_tab_depth(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Derinlik  ")
+        tab = self._kaydirilabilir(tab)
 
         c = self._section(tab, "Canli derinlik haritasi")
 
@@ -1071,9 +1202,16 @@ class CameraApp:
                   bg="#2d6a4f", fg="white", font=("Segoe UI", 10, "bold"),
                   relief="flat", padx=14, pady=6, cursor="hand2").pack(side=tk.LEFT, padx=(0, 6))
 
+        self.qframes_var = tk.IntVar(value=10)
         tk.Button(btn_row, text="Kaliteli Tek Kare [F]", command=self._capture_quality_frame,
                   bg="#6a2d4f", fg="white", font=("Segoe UI", 10, "bold"),
                   relief="flat", padx=14, pady=6, cursor="hand2").pack(side=tk.LEFT)
+        tk.Label(btn_row, text="kare:", bg=CARD, fg=MUTED,
+                 font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(8, 2))
+        tk.Spinbox(btn_row, from_=1, to=60, increment=5, width=4,
+                   textvariable=self.qframes_var, bg=BG, fg=FG,
+                   buttonbackground=BORDER, relief="flat",
+                   font=("Segoe UI", 9)).pack(side=tk.LEFT)
 
         btn_row2 = tk.Frame(c, bg=CARD)
         btn_row2.pack(fill=tk.X, pady=4)
@@ -1112,7 +1250,8 @@ class CameraApp:
                            activebackground=CARD, activeforeground=FG,
                            font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=3)
 
-        c = self._section(tab, "Gorsellestirme")
+        c = viz_c = self._section(tab, "Gorsellestirme ve gelismis",
+                                  katlanabilir=True, acik=False)
 
         cmap_row = tk.Frame(c, bg=CARD)
         cmap_row.pack(fill=tk.X, pady=4)
@@ -1217,8 +1356,9 @@ class CameraApp:
                            activebackground=CARD, activeforeground=FG,
                            font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=3)
 
-        # Zemin cikarma: masa/zemin duzlemi bilindiginde ona yakin pikseller
-        # maskelenir, geriye yalnizca uzerindeki cisimler kalir.
+        # Zemin cikarma GORSELLESTIRME degil, olcum hazirligidir -
+        # katlanabilir bolumun icinde kalmamali, her zaman gorunsun.
+        c = self._section(tab, "Zemin duzlemi (olcum icin)")
         # Duzlem: n·X + d = 0  ->  bir noktanin yuksekligi h = n·X + d
         zem_row = tk.Frame(c, bg=CARD)
         zem_row.pack(fill=tk.X, pady=4)
@@ -1251,7 +1391,9 @@ class CameraApp:
                                    anchor="w", wraplength=380)
         self.lbl_ground.pack(fill=tk.X)
 
-        viz_row = tk.Frame(c, bg=CARD)
+        # Konturlar ve ham/WLS karsilastirma GORSELLESTIRMEDIR - zemin
+        # bolumune dusmustu, katlanan bolume geri aliniyor.
+        viz_row = tk.Frame(viz_c, bg=CARD)
         viz_row.pack(fill=tk.X, pady=4)
         self.contour_var = tk.BooleanVar(value=False)
         tk.Checkbutton(viz_row, text="Derinlik konturlari",
@@ -1313,6 +1455,7 @@ class CameraApp:
     def _build_tab_measure(self):
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Olcum  ")
+        tab = self._kaydirilabilir(tab)
 
         c = self._section(tab, "Nesne olcumu")
 
@@ -1326,16 +1469,57 @@ class CameraApp:
                   command=self._do_measure,
                   bg="#2d6a4f", fg="white", font=("Segoe UI", 10, "bold"),
                   relief="flat", padx=12, pady=6, cursor="hand2").pack(side=tk.LEFT)
-        tk.Button(btn_row, text="Duzlemle olc",
+        self.pca_sinir_var = tk.IntVar(value=250)
+        self.pca_tol_var = tk.IntVar(value=30)
+        # VARSAYILAN KAPALI. Olculdu: bolge derinlik TOLERANSIYLA
+        # buyudugu icin zaten ince bir derinlik dilimidir - yani tanimi
+        # geregi neredeyse DUZLEMDIR. RANSAC bu yuzden her seferinde
+        # %69-100 "duzlem" buluyor ve cismin kendisini siliyor; termosun
+        # tam merkezine tiklandiginda bile "destek yuzeyinde" diyor.
+        # Fikir yalnizca bolge derinlikce kalin oldugunda anlamli.
+        self.pca_duzlem_var = tk.BooleanVar(value=False)
+        tk.Button(btn_row, text="Tiklayarak olc (duzlemsiz)",
+                  command=self._measure_click_pca,
+                  bg="#6a4d1a", fg="white", font=("Segoe UI", 10, "bold"),
+                  relief="flat", padx=12, pady=6,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(6, 0))
+        # Butonlar tek satira sigmiyordu (sagdaki ikisi ekran disinda
+        # kaliyordu). Ikinci satira tasiniyor.
+        btn_row2 = tk.Frame(c, bg=CARD)
+        btn_row2.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(btn_row2, text="tol mm:", bg=CARD, fg=MUTED,
+                 font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(0, 2))
+        tk.Spinbox(btn_row2, from_=5, to=200, increment=5, width=4,
+                   textvariable=self.pca_tol_var, bg=BG, fg=FG,
+                   buttonbackground=BORDER, relief="flat",
+                   font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        tk.Label(btn_row2, text="sinir mm:", bg=CARD, fg=MUTED,
+                 font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(6, 2))
+        tk.Spinbox(btn_row2, from_=80, to=800, increment=25, width=5,
+                   textvariable=self.pca_sinir_var, bg=BG, fg=FG,
+                   buttonbackground=BORDER, relief="flat",
+                   font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        tk.Checkbutton(btn_row2, text="masayi at", variable=self.pca_duzlem_var,
+                       bg=CARD, fg=FG, selectcolor=BG, activebackground=CARD,
+                       activeforeground=FG, font=("Segoe UI", 8)
+                       ).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Button(btn_row2, text="Kutu gorseli",
+                  command=self._save_box_visual,
+                  bg="#4a2d6a", fg="white", font=("Segoe UI", 10, "bold"),
+                  relief="flat", padx=12, pady=6,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(6, 0))
+        tk.Button(btn_row2, text="Duzlemle olc",
                   command=self._measure_object_plane,
                   bg="#1a5276", fg="white", font=("Segoe UI", 10, "bold"),
                   relief="flat", padx=12, pady=6,
                   cursor="hand2").pack(side=tk.LEFT, padx=(6, 0))
 
         c = self._section(tab, "Sonuc")
-        self.lbl_meas_en = self._info_row(c, "En (mm)")
-        self.lbl_meas_boy = self._info_row(c, "Boy (mm)")
-        self.lbl_meas_yuk = self._info_row(c, "Yukseklik (mm)")
+        # Isimler FIZIKSEL yonu soylesin. "En/Boy" tek basina belirsiz;
+        # hangi eksen oldugu anlasilmiyordu.
+        self.lbl_meas_en = self._info_row(c, "Taban KISA kenar (mm)")
+        self.lbl_meas_boy = self._info_row(c, "Taban UZUN kenar (mm)")
+        self.lbl_meas_yuk = self._info_row(c, "YUKSEKLIK - yuzeye dik (mm)")
         self.lbl_meas_status = self._info_row(c, "Durum")
 
         c = self._section(tab, "Kutu onerisi")
@@ -1370,17 +1554,7 @@ class CameraApp:
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Durum  ")
 
-        canvas = tk.Canvas(tab, bg=CARD, highlightthickness=0)
-        scrollbar = tk.Scrollbar(tab, orient="vertical", command=canvas.yview)
-        sf = tk.Frame(canvas, bg=CARD)
-        sf.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=sf, anchor="nw", tags="sf")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig("sf", width=e.width))
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sf.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
-        canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
+        sf = self._kaydirilabilir(tab)
 
         # Pipeline durumu
         c = self._section(sf, "Pipeline durumu")
@@ -1441,17 +1615,7 @@ class CameraApp:
         tab = tk.Frame(self.notebook, bg=CARD)
         self.notebook.add(tab, text="  Rehber  ")
 
-        canvas = tk.Canvas(tab, bg=CARD, highlightthickness=0)
-        scrollbar = tk.Scrollbar(tab, orient="vertical", command=canvas.yview)
-        sf = tk.Frame(canvas, bg=CARD)
-        sf.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=sf, anchor="nw", tags="sf")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig("sf", width=e.width))
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sf.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
-        canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1*(e.delta//120), "units"))
+        sf = self._kaydirilabilir(tab)
 
         steps = [
             ("ADIM 1: Cozunurluk sec", ACCENT,
@@ -2111,6 +2275,33 @@ class CameraApp:
                 prev_time = now
 
     # â”€â”€ Display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    def _on_cam_wheel(self, event):
+        """Fare tekerlegi: imlecin bulundugu noktaya yakinlas/uzaklas."""
+        s = self._display_scale
+        if s <= 0:
+            return
+        ox = getattr(self, "_display_off_x", 0.0)
+        oy = getattr(self, "_display_off_y", 0.0)
+        kx, ky = getattr(self, "_zoom_crop", (0, 0))
+        # Imlecin BIRLESIK goruntudeki karsiligi - yakinlastirma bu
+        # noktanin etrafinda olsun ki kullanici baktigi yeri kaybetmesin.
+        mx = kx + (event.x - ox) / s
+        my = ky + (event.y - oy) / s
+        yon = 1 if getattr(event, "delta", 0) > 0 else -1
+        eski = float(getattr(self, "_zoom", 1.0))
+        yeni = float(np.clip(eski * (1.25 if yon > 0 else 1 / 1.25), 1.0, 8.0))
+        self._zoom = yeni
+        self._zoom_c = (mx, my) if yeni > 1.001 else None
+        self.status_bar.config(
+            text=f"  Yakinlastirma {yeni:.1f}x"
+                 f"{'  (tekerlek: degistir, cift tik: sifirla)' if yeni > 1 else ''}")
+
+    def _on_cam_double(self, event):
+        """Cift tiklama: yakinlastirmayi sifirla."""
+        self._zoom = 1.0
+        self._zoom_c = None
+        self.status_bar.config(text="  Yakinlastirma sifirlandi")
+
     def _on_cam_click(self, event):
         """Sol goruntuye tiklaninca o noktayi olcum noktasi yap."""
         if not self.depth_mode and not getattr(self, '_quality_frozen', False):
@@ -2120,9 +2311,15 @@ class CameraApp:
         fl_h = getattr(self, "_display_fl_h", 0)
         if s <= 0 or fl_w <= 0 or fl_h <= 0:
             return
-        # Ekran -> birlesik goruntu koordinati
-        gx = event.x / s
-        gy = event.y / s
+        # Ekran -> birlesik goruntu koordinati.
+        # Once ORTALAMA kaydirmasi cikarilir, sonra olcege bolunur.
+        ox = getattr(self, "_display_off_x", 0.0)
+        oy = getattr(self, "_display_off_y", 0.0)
+        kx, ky = getattr(self, "_zoom_crop", (0, 0))
+        gx = kx + (event.x - ox) / s
+        gy = ky + (event.y - oy) / s
+        if gx < kx or gy < ky:
+            return                      # siyah banda tiklandi
         if gx >= fl_w:          # sag panele tiklandi
             return
         # Birlesik goruntu -> DISPARITY koordinati.
@@ -2336,6 +2533,22 @@ class CameraApp:
             self._display_fl_h = fl.shape[0]
             combined = np.hstack([fl, fr])
 
+            # YAKINLASTIRMA: birlesik goruntuden bir pencere kirpilir.
+            # Nisan almak icin gerekli - 2048 piksel genisligindeki harita
+            # ekrana ~1050 px sigdiginda 1 ekran pikseli ~2 harita pikseli
+            # demek; tiklama hassasiyeti o oranda dusuyor.
+            z = max(1.0, float(getattr(self, "_zoom", 1.0)))
+            if z > 1.001:
+                ch0, cw0 = combined.shape[:2]
+                w2, h2 = int(cw0 / z), int(ch0 / z)
+                zc = self._zoom_c or (cw0 // 2, ch0 // 2)
+                x0 = int(np.clip(zc[0] - w2 // 2, 0, max(0, cw0 - w2)))
+                y0 = int(np.clip(zc[1] - h2 // 2, 0, max(0, ch0 - h2)))
+                combined = combined[y0:y0 + h2, x0:x0 + w2]
+                self._zoom_crop = (x0, y0)
+            else:
+                self._zoom_crop = (0, 0)
+
             mw = max(self.cam_label.winfo_width(), 100)
             mh = max(self.cam_label.winfo_height(), 100)
             ch, cw = combined.shape[:2]
@@ -2343,6 +2556,13 @@ class CameraApp:
             self._display_scale = scale
             if scale < 1.0:
                 combined = cv2.resize(combined, (int(cw*scale), int(ch*scale)))
+            # tk.Label goruntuyu ORTALAR (varsayilan anchor=CENTER).
+            # Etiket goruntuden buyukse ust/altta ve yanlarda siyah bant
+            # olusur; tiklama koordinati etiketin sol-ust kosesinden
+            # olculdugu icin bu kaydirma cikarilmazsa nisan noktasi
+            # kayar (gozlendi: ust bolgeye tiklaninca alta dusuyordu).
+            self._display_off_x = max(0, (mw - combined.shape[1]) / 2.0)
+            self._display_off_y = max(0, (mh - combined.shape[0]) / 2.0)
 
             rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
             img = ImageTk.PhotoImage(image=Image.fromarray(rgb))
@@ -3318,7 +3538,15 @@ class CameraApp:
 
         def do_quality():
             try:
-                N_FRAMES = 10
+                # Kac kare ortalanacak. 10 varsayilan; artirmak sensor
+                # gurultusunu sqrt(N) ile azaltir (10->3.16x, 40->6.32x)
+                # ama sure uzadikca sahnenin kipirdama riski artar ve
+                # ortalama bulaniklasir. Kars, deneyle secilsin diye
+                # arayuzden ayarlanabilir.
+                try:
+                    N_FRAMES = max(1, min(60, int(self.qframes_var.get())))
+                except Exception:
+                    N_FRAMES = 10
                 acc_l = None
                 acc_r = None
                 collected = 0
@@ -3466,6 +3694,29 @@ class CameraApp:
 
                 disp_gray = cv2.cvtColor(d_norm, cv2.COLOR_GRAY2BGR)
                 disp_gray[dsp <= 0] = [0, 0, 0]
+                # HAM/WLS karsilastirmasi kaliteli karede de calissin.
+                # Eskiden yalnizca canli modda vardi; oysa "bu plato
+                # gercek olcum mu, WLS duzlemesi mi" sorusu tam da
+                # olcum alinan karede sorulur.
+                if self.compare_var.get():
+                    ham_d = dsp_l.astype(np.float32) / 16.0
+                    ham_d[ham_d <= 0] = 0
+                    ortak = max(dsp.max(), ham_d.max(), 1)
+                    hn = (ham_d / ortak * 255).astype(np.uint8)
+                    wn = (dsp / ortak * 255).astype(np.uint8)
+                    hc = cv2.applyColorMap(hn, cmap_id)
+                    wc = cv2.applyColorMap(wn, cmap_id)
+                    hc[ham_d <= 0] = [0, 0, 0]
+                    wc[dsp <= 0] = [0, 0, 0]
+                    hh, ww = wc.shape[:2]
+                    orta = ww // 2
+                    disp_gray = wc.copy()
+                    disp_gray[:, :orta] = hc[:, :orta]
+                    cv2.line(disp_gray, (orta, 0), (orta, hh), (255,255,255), 2)
+                    cv2.putText(disp_gray, "Ham SGBM (filtresiz)", (20, 45),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255,255,255), 2)
+                    cv2.putText(disp_gray, "WLS + temizleme", (orta + 20, 45),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255,255,255), 2)
                 self._quality_overlay = overlay.copy()
                 self._quality_depth = disp_gray.copy()
                 self._quality_dsp = dsp.copy()
@@ -3598,6 +3849,290 @@ class CameraApp:
             self.lbl_meas_bg.config(text="Kaydedildi", fg=GREEN)
             self.lbl_meas_status.config(text="Arka plan hazir, nesneyi koy ve M bas", fg=YELLOW)
 
+    @staticmethod
+    def _taban_geri_kazan(govde, h, gec, esik_mm, yaricap=15):
+        """Cismin duzleme temas eden bandini geri kazan.
+
+        Zemin cikarma "duzlemden esik kadar yuksek" pikselleri tutar;
+        cismin masaya DEGEN alt bandi (h < esik) bu tanimla zeminle
+        birlikte silinir. Gorsel olarak cismin alti kesik gorunur.
+
+        Neden YEREL (govdeye komsu) yontem: govdenin duzlem izdusumunu
+        (ayak izi) kullanmak cazip ama guvensiz - egik bakista govdenin
+        izdusumu gercek tabandan tasar ve yanindaki masa da iceri girer.
+        Komsuluk siniri boyle bir kacagi yapisal olarak imkansiz kilar.
+
+        NOT: bu adim yalnizca GORUNUM icindir. Yukseklik duzlemden en
+        yuksek noktaya olculur, taban gorunmese de degismez; en/boy da
+        govdenin izdusumunden gelir. Olcum bu adim olmadan da dogrudur.
+        """
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                      (yaricap * 2 + 1, yaricap * 2 + 1))
+        komsu = cv2.dilate(govde.astype(np.uint8), k).astype(bool)
+        return govde | (komsu & gec & (h >= -5.0) & (h < esik_mm))
+
+    @staticmethod
+    def _yuvarlak_mi(xy, uzun_kenar):
+        """Ayak izi bir cember yayi mi? (yuvarlak, cap) dondurur.
+
+        NEDEN GEREKLI: stereo cismin yalnizca ON yuzunu gorur. Silindirin
+        duzleme izdusumu tam daire degil, YARIM DAIRE YAYIdir. minAreaRect
+        o yaya uygulaninca uzun kenar ~2r (dogru cap) ama kisa kenar ~r
+        cikar - yani cap YARIYA duser. Cember uydurup gercek capi geri
+        kazaniyoruz.
+
+        Iki sart:
+          1) kalinti/yaricap kucuk  -> noktalar gercekten cembere oturuyor
+          2) yaricap makul (< 0.60 * uzun kenar) -> duz bir yuzey de
+             cembere oturur ama DEV yaricapla; bu sart onu eler.
+
+        Esik 0.06: sentetik kalibrasyonla secildi (gurultu 2 mm'de
+        yaylar 0.038-0.042, kutunun iki yuzu 0.092). 5 mm gurultude
+        ayrim kayboluyor, ama 700 mm'de derinlik gurultusu ~1.7 mm.
+        """
+        x = xy[:, 0].astype(np.float64)
+        y = xy[:, 1].astype(np.float64)
+        A = np.stack([x, y, np.ones_like(x)], 1)
+        try:
+            sol, *_ = np.linalg.lstsq(A, x * x + y * y, rcond=None)
+        except np.linalg.LinAlgError:
+            return False, None
+        cx, cy = sol[0] / 2.0, sol[1] / 2.0
+        r2 = sol[2] + cx * cx + cy * cy
+        if r2 <= 0:
+            return False, None
+        r = float(np.sqrt(r2))
+        kal = float(np.median(np.abs(np.hypot(x - cx, y - cy) - r)))
+        if r >= 0.60 * uzun_kenar:          # duz yuzey, dev yaricap
+            return False, None
+        return (kal / r) < 0.06, 2.0 * r
+
+    def _save_box_visual(self):
+        """Olculen 3B kutuyu goruntu uzerine cizip kaydet.
+
+        Sayilara bakip dogrulugu anlamak zor; kutu cismin uzerine
+        cizilince hata aninda gorunur (kutu cismi sariyorsa olcum
+        dogru, cevreye tasiyorsa bolge kacmis). Rapora da bu gorsel
+        girer - "olculdu" demek yerine "olculen su" gostermek.
+        """
+        try:
+            import subprocess
+            if self._click_point is None:
+                self.lbl_meas_status.config(
+                    text="Once cismin uzerine tikla", fg=YELLOW)
+                return
+            kayit = sorted(glob.glob(os.path.join(
+                PROJECT_DIR, "output", "depth_captures", "q_*_data.npz")))
+            if not kayit:
+                self.lbl_meas_status.config(
+                    text="Once [F] ile kaliteli kare al", fg=YELLOW)
+                return
+            sy, sx = self._click_point
+            self.lbl_meas_status.config(text="Gorsel uretiliyor...", fg=YELLOW)
+            self.root.update()
+            r = subprocess.run(
+                [sys.executable, os.path.join(SCRIPT_DIR, "kutu_gorsel.py"),
+                 "--dosya", os.path.basename(kayit[-1]),
+                 "--nokta", f"{int(sx)},{int(sy)}",
+                 "--sinir", str(self.pca_sinir_var.get()),
+                 "--tol", str(self.pca_tol_var.get())],
+                capture_output=True, text=True, timeout=90)
+            cikti = (r.stdout or "") + (r.stderr or "")
+            ad = ""
+            for satir in cikti.splitlines():
+                if "Gorsel:" in satir:
+                    ad = satir.split("Gorsel:")[1].strip()
+            if ad:
+                yol = os.path.join(PROJECT_DIR, "output",
+                                   "depth_captures", ad)
+                self.lbl_meas_status.config(
+                    text=f"Gorsel kaydedildi: {ad}", fg=GREEN)
+                try:
+                    os.startfile(yol)
+                except Exception:
+                    pass
+            else:
+                self.lbl_meas_status.config(
+                    text=f"Gorsel uretilemedi: {cikti.strip()[:120]}", fg=RED)
+        except Exception as ex:
+            self.lbl_meas_status.config(text=f"Hata: {ex}", fg=RED)
+
+    @staticmethod
+    def _baskin_duzlemi_at(m, pts, sy, sx, esik=8.0, tur=300):
+        """Bolgedeki baskin DUZLEMI (destek yuzeyi) bul ve at.
+
+        NEDEN: cisim bir masanin uzerindeyse derinlik surekliligi
+        tabandan masaya kaciyor ve bolge masayi da aliyor (olculdu:
+        340x260 mm cikti, gercek 250x72). Masa bir DUZLEM, cisim degil -
+        bu ayrimi kullanabiliriz.
+
+        Onceden tespit edilmis zemin duzlemine ihtiyac YOK; duzlem
+        bolgenin kendi icinden RANSAC ile bulunur. Kamera yuzeye cok
+        siyirtma acisiyla baksa bile calisir.
+
+        Olculdu (esik taramasi): 5 mm -> duzlem tam atilmiyor (242x199),
+        8 mm -> 197x64 (dengeli), 12 mm -> cismin bir kismi da gidiyor,
+        20 mm -> bolge cokuyor. Varsayilan 8 mm.
+        """
+        P3 = pts[m]
+        if len(P3) < 1000:
+            return m, 0.0
+        rng = np.random.default_rng(0)
+        en_iyi, en_n, en_d = 0, None, None
+        for _ in range(tur):
+            i = rng.choice(len(P3), 3, replace=False)
+            a, b, cc = P3[i]
+            nn = np.cross(b - a, cc - a)
+            L = float(np.linalg.norm(nn))
+            if L < 1e-9:
+                continue
+            nn = nn / L
+            dd = float(-nn @ a)
+            say = int((np.abs(P3 @ nn + dd) < esik).sum())
+            if say > en_iyi:
+                en_iyi, en_n, en_d = say, nn, dd
+        if en_n is None:
+            return m, 0.0
+        oran = en_iyi / len(P3)
+        if oran < 0.25:
+            return m, oran          # baskin duzlem yok, dokunma
+        h = np.full(m.shape, 1e9)
+        h[m] = np.abs(pts[m] @ en_n + en_d)
+        m2 = m & (h >= esik)
+        n, lab, st, _ = cv2.connectedComponentsWithStats(
+            m2.astype(np.uint8), 8)
+        if lab[sy, sx] > 0:
+            m2 = (lab == lab[sy, sx])
+            return (m2 if m2.sum() > 300 else m), oran
+        # TOHUM DUZLEMIN UZERINDEYDI - yani kullanici cismin degil
+        # DESTEK YUZEYININ uzerine tiklamis. "En buyuk bolgeye" dusmek
+        # sessizce baska bir seyi olcmek olur (gozlendi: dizustu
+        # bilgisayarin kenari olculdu). Bunu bildir.
+        return None, oran
+
+    def _measure_click_pca(self):
+        """Zemin duzlemi OLMADAN olc: tiklanan noktadan derinlik
+        surekliligiyle bolge buyut, PCA ile yonlendirilmis kutu cikar.
+
+        NE ZAMAN: duzlem yontemi kullanilamadiginda - duzlem yoksa,
+        eskimisse veya kamera yuzeye cok siyirtma acisiyla bakiyorsa
+        (olculdu: 79.8 derecede duzlem yontemi 1053 mm "cap" verdi,
+        bu yontem ayni sahnede 288x126x53 mm verdi; gercek ~250x72x72).
+
+        SINIRI: cisim arka planindan DERINLIKCE ayrilmalidir. Bir
+        yuzeyin uzerinde duran ve o yuzeyle ayni derinlikte olan cisim
+        ayrilamaz - o durumda duzlem yontemi gerekir.
+        """
+        if not self._ensure_calib_current():
+            self.lbl_meas_status.config(text="Kalibrasyon yok", fg=RED)
+            return
+        dsp = getattr(self, "_pre_ground_dsp", None)
+        if dsp is None:
+            dsp = getattr(self, "_current_dsp", None)
+        if dsp is None:
+            self.lbl_meas_status.config(
+                text="Once [F] ile kaliteli kare al", fg=YELLOW)
+            return
+        H, W = dsp.shape
+        if self._click_point is not None:
+            sy, sx = int(self._click_point[0]), int(self._click_point[1])
+            nasil = "tiklanan nokta"
+        else:
+            sy, sx = H // 2, W // 2
+            nasil = "goruntu merkezi"
+        sy = max(0, min(sy, H - 1)); sx = max(0, min(sx, W - 1))
+        if dsp[sy, sx] <= 0:
+            self.lbl_meas_status.config(
+                text="Tiklanan noktada disparity yok - baska yere tikla",
+                fg=RED)
+            return
+        try:
+            # Tolerans DERINLIK (mm) cinsinden; disparity'ye mesafeye
+            # gore cevrilir. Sabit disparity toleransi uzakta cok genis
+            # bir derinlik bandi kabul eder (olculdu: 6 px, 730 mm'de
+            # 63 mm ama 1750 mm'de 365 mm) ve bolge kacar.
+            pts0 = cv2.reprojectImageTo3D(dsp, self.calib_data["Q"]) * 1000.0
+            Z0 = float(pts0[sy, sx, 2])
+            f_px0 = float(self.calib_data["P1"][0, 0])
+            B_mm0 = float(np.linalg.norm(self.calib_data["T"])) * 1000.0
+            # Olculdu (termos, 849 mm): tol 20-30 mm -> 244x70-71 mm
+            # (gercek 250x72, hata <%3). 60 mm -> 244x103, 100 mm ->
+            # 244x144, yani bolge masaya kaciyor. 30 mm guvenli orta yol.
+            tol_mm = float(self.pca_tol_var.get())
+            tol = (f_px0 * B_mm0 * tol_mm / (Z0 * Z0)
+                   if np.isfinite(Z0) and Z0 > 0 else 6.0)
+            tol = float(max(0.5, min(tol, 40.0)))
+            m0 = np.zeros((H + 2, W + 2), np.uint8)
+            im = dsp.astype(np.float32).copy()
+            cv2.floodFill(im, m0, (sx, sy), 0, loDiff=tol, upDiff=tol,
+                          flags=(8 | cv2.FLOODFILL_MASK_ONLY
+                                 | cv2.FLOODFILL_FIXED_RANGE | (255 << 8)))
+            m = m0[1:-1, 1:-1].astype(bool) & (dsp > 0)
+            if m.mean() > 0.25:
+                self.lbl_meas_status.config(
+                    text=(f"Bolge kareye tasti (%{m.mean()*100:.0f}) - "
+                          f"cisim arka planla ayni derinlikte olabilir. "
+                          f"Duzlem yontemi gerekir."), fg=RED)
+                return
+            pts = pts0
+            m &= np.isfinite(pts).all(axis=2)
+            # TOHUMDAN 3B UZAKLIK SINIRI. Derinlik surekliligi tek
+            # basina bolgeyi cisme hapsetmiyor - komsu yuzeyler ayni
+            # derinlikte oldugunda bolge yayiliyor. Olculdu: sinirsiz
+            # uzun eksen 635 mm, 200 mm sinirla 314 mm.
+            # Sinir, olculebilecek en buyuk cismi de belirler.
+            sinir = float(self.pca_sinir_var.get())
+            tohum3 = pts[sy, sx]
+            if np.isfinite(tohum3).all():
+                m &= (np.linalg.norm(pts - tohum3, axis=2) < sinir)
+            n, lab, st, _ = cv2.connectedComponentsWithStats(
+                m.astype(np.uint8), 8)
+            if lab[sy, sx] > 0:
+                m = (lab == lab[sy, sx])       # tohumun BOLGESI
+            elif n > 1:
+                i = int(np.argmax(st[1:, cv2.CC_STAT_AREA])) + 1
+                m = (lab == i)
+            # Destek yuzeyini (masa) bolgeden at
+            duz_not = ""
+            if self.pca_duzlem_var.get():
+                m_yeni, d_oran = self._baskin_duzlemi_at(m, pts, sy, sx)
+                if m_yeni is None:
+                    self.lbl_meas_status.config(
+                        text=(f"TIKLANAN NOKTA DESTEK YUZEYINDE "
+                              f"(bolgenin %{d_oran*100:.0f}'i duzlem). "
+                              f"Masaya degil CISMIN uzerine tikla - "
+                              f"tekerlekle yakinlasip nisan al."), fg=RED)
+                    for L in (self.lbl_meas_en, self.lbl_meas_boy,
+                              self.lbl_meas_yuk):
+                        L.config(text="-", fg=RED)
+                    return
+                m = m_yeni
+                if d_oran >= 0.25:
+                    duz_not = f" | duzlem atildi (%{d_oran*100:.0f})"
+            ok = m
+            P = pts[ok]
+            if len(P) < 800:
+                self.lbl_meas_status.config(
+                    text=f"Yeterli 3B nokta yok ({len(P)})", fg=RED)
+                return
+            Q = P - P.mean(axis=0)
+            _, _, Vt = np.linalg.svd(Q, full_matrices=False)
+            pr = Q @ Vt.T
+            b = sorted([float(np.percentile(pr[:, k], 99)
+                              - np.percentile(pr[:, k], 1)) for k in range(3)],
+                       reverse=True)
+            self.lbl_meas_yuk.config(text=f"{b[0]:.1f}", fg=GREEN)
+            self.lbl_meas_boy.config(text=f"{b[1]:.1f}", fg=GREEN)
+            self.lbl_meas_en.config(text=f"{b[2]:.1f}", fg=GREEN)
+            self.lbl_meas_status.config(
+                text=(f"DUZLEMSIZ (PCA) | {nasil} | {int(ok.sum()):,} px | "
+                      f"Z={np.median(P[:, 2]):.0f} mm{duz_not} | tol {tol:.1f} px | "
+                      f"kisa kenar CISMIN GORUNEN yuzunun kalinligidir, "
+                      f"arka yuz olculemez"), fg=GREEN)
+            self._son_olcum = (b[0], b[1], b[2])
+        except Exception as ex:
+            self.lbl_meas_status.config(text=f"Hata: {ex}", fg=RED)
+
     def _measure_object_plane(self):
         """Zemin duzlemi + tiklanan nokta ile cismin EN/BOY/YUKSEKLIK'ini olc.
 
@@ -3639,6 +4174,54 @@ class CameraApp:
             h[gec] = (pts[gec] @ n + d) * 1000.0
             Zmm = pts[:, :, 2] * 1000.0
 
+            # BAKIS ACISI KAPISI
+            # Duzlem normali ile optik eksen arasindaki aci buyudukce
+            # yuzey KENARDAN gorulur. Olculdu (Z=700, blok 7 px):
+            #   20 derece -> blok boyunca 0.26 px kayma  (cok iyi)
+            #   43 derece -> 0.68 px                     (sinirda)
+            #   60 derece -> 1.24 px                     (bozulur)
+            #   80 derece -> 3.99 px                     (eslesme imkansiz)
+            # Ayrica yukseklik yonunun optik eksene izdusumu cos(aci):
+            # 80 derecede 0.177, yani olcmek istedigimiz boyut en zayif
+            # gozlenen yonde kaliyor. Bu kosulda uretilen her sayi
+            # yaniltici olur - sayi uretmek yerine durmak dogru.
+            # Kapi DEGIL uyari: kullanici kamerayi her zaman
+            # yeniden konumlandiramaz. Olcum yapilir ama guvenilirlik
+            # acikca yazilir - karari kullanici verir.
+            aci_p = float(np.degrees(np.arccos(min(abs(n[2]), 1.0))))
+            if aci_p > 60.0:
+                aci_not = (f"  !! BAKIS ACISI {aci_p:.0f} derece - yuzeye "
+                           f"neredeyse kenardan bakiliyor, yukseklik "
+                           f"guvenilmez (izdusum {abs(n[2]):.2f})")
+                aci_renk = RED
+            elif aci_p > 45.0:
+                aci_not = f"  ! bakis acisi {aci_p:.0f} derece - sinirda"
+                aci_renk = YELLOW
+            else:
+                aci_not, aci_renk = "", None
+
+            # DUZLEM HALA GECERLI MI?
+            # Duzlem, tespit edildigi andaki KAMERA POZUNA goredir.
+            # Kamera veya yuzey oynadiysa dosya durur ama artik hicbir
+            # gercek yuzeye karsilik gelmez. O zaman "duzlemin ustunde"
+            # testi tum sahneyi secer ve olcum sacmalar (gozlendi:
+            # boy 3806 mm). Dosyanin VARLIGI gecerlilik demek degil.
+            # Olcut: gercekten duzlem uzerinde (|h| < 15 mm) duran
+            # piksel orani. Duzlem sahnedeki bir yuzeyi tarif ediyorsa
+            # bu oran kayda deger olmali.
+            duzlem_ustu = float((gec & (np.abs(h) < 15.0)).sum()
+                                / max(gec.sum(), 1))
+            if duzlem_ustu < 0.03:
+                self.lbl_meas_status.config(
+                    text=(f"ZEMIN DUZLEMI ESKIMIS - sahnenin yalnizca "
+                          f"%{duzlem_ustu*100:.1f}'i duzlem uzerinde. "
+                          f"Kamera/yuzey oynamis. Derinlik tabi > "
+                          f"'Zemin tespit et' ile YENIDEN tespit et."),
+                    fg=RED)
+                self.lbl_meas_en.config(text="-", fg=RED)
+                self.lbl_meas_boy.config(text="-", fg=RED)
+                self.lbl_meas_yuk.config(text="-", fg=RED)
+                return
             duzlem = gec & (np.abs(h) < 15)
             z_masa = float(np.median(Zmm[duzlem])) if duzlem.sum() > 5000 \
                 else float(np.median(Zmm[gec]))
@@ -3663,14 +4246,38 @@ class CameraApp:
             else:
                 hedef = np.array([W / 2.0, H / 2.0])
                 nasil = "goruntu merkezi"
-            aday = [(np.linalg.norm(cen[k] - hedef), k) for k in range(1, nlab)
+            # SECIM: once TIKLANAN PIKSELIN ICINDE oldugu bolge.
+            # Eskiden "merkezi tiklamaya en yakin bolge" seciliyordu; bu
+            # yanlis - kucuk bir cisme tiklarken yanindaki buyuk cismin
+            # merkezi daha yakin olabilir ve o olculur. Tiklanan pikselin
+            # etiketine bakmak niyeti dogrudan verir.
+            tik_y, tik_x = int(hedef[1]), int(hedef[0])
+            tik_y = max(0, min(tik_y, H - 1))
+            tik_x = max(0, min(tik_x, W - 1))
+            secilen = int(lab[tik_y, tik_x])
+            if secilen > 0 and st[secilen, cv2.CC_STAT_AREA] >= 800:
+                nasil += " (tam uzerinde)"
+            else:
+                # Tiklanan piksel hicbir bolgede degil (zemin, bosluk veya
+                # esik alti). En yakin merkezli bolgeye dus.
+                aday = [(np.linalg.norm(cen[k] - hedef), k)
+                        for k in range(1, nlab)
+                        if st[k, cv2.CC_STAT_AREA] >= 3000]
+                if not aday:
+                    self.lbl_meas_status.config(
+                        text="Tiklanan noktada cisim yok ve yakinda "
+                             "yeterli buyuklukte bolge bulunamadi", fg=RED)
+                    return
+                aday.sort()
+                secilen = aday[0][1]
+                nasil += " (uzerinde degil, en yakin bolge)"
+            aday = [k for k in range(1, nlab)
                     if st[k, cv2.CC_STAT_AREA] >= 3000]
-            if not aday:
-                self.lbl_meas_status.config(
-                    text="Yeterli buyuklukte cisim yok", fg=RED)
-                return
-            aday.sort()
-            cisim = (lab == aday[0][1])
+            govde = (lab == secilen)
+            # Cismin masaya degen alt bandini geri kazan (yalnizca
+            # gorunum; olcum bu adim olmadan da dogru - bkz. metod notu)
+            cisim = self._taban_geri_kazan(govde, h, gec, esik)
+            kazanc = int(cisim.sum() - govde.sum())
 
             yardim = np.array([1.0, 0, 0]) if abs(n[0]) < 0.9 \
                 else np.array([0, 1.0, 0])
@@ -3680,6 +4287,21 @@ class CameraApp:
             xy = np.stack([P @ u, P @ v], 1).astype(np.float32)
             (_, _), (w1, w2), _ = cv2.minAreaRect(xy)
             en, boy = sorted((w1, w2))
+            # Yuvarlak cisimde kisa kenar yariya duser (yalnizca on yuz
+            # gorunur -> ayak izi yarim daire yayi). Cember uydurup
+            # gercek capi geri kazan.
+            # Bakis acisi kotuyse duzeltme UYGULANMAZ. Cember uydurma
+            # matematigi dogru ama girdi bolge bozuksa sonucu "duzeltilmis"
+            # diye sunmak yaniltir (gozlendi: cap 1053 mm). Cop veriyi
+            # susleme - oldugu gibi goster.
+            yv, cap = (False, None)
+            if aci_p <= 60.0:
+                yv, cap = self._yuvarlak_mi(xy, boy)
+            yuv_not = ""
+            if yv and cap is not None:
+                yuv_not = (f"  [YUVARLAK: cap {cap:.0f} mm - kisa kenar "
+                           f"{en:.0f} yerine cap kullanildi]")
+                en = boy = float(cap)
             yuk = float(np.percentile(h[cisim], 98))
 
             # ARALIK KONTROLU: cismin tepesi Z_min'den yakinsa o
@@ -3701,12 +4323,15 @@ class CameraApp:
                 uyari = f"  ! sinira yakin ({z_tepe:.0f} / {z_min:.0f} mm)"
                 renk = YELLOW
 
+            if aci_renk is not None and renk == GREEN:
+                renk = aci_renk
+            uyari = aci_not + yuv_not + uyari
             self.lbl_meas_en.config(text=f"{en:.1f}", fg=renk)
             self.lbl_meas_boy.config(text=f"{boy:.1f}", fg=renk)
             self.lbl_meas_yuk.config(text=f"{yuk:.1f}", fg=renk)
             self.lbl_meas_status.config(
                 text=f"{nasil} | {len(aday)} aday | "
-                     f"{int(cisim.sum()):,} px | desi "
+                     f"{int(cisim.sum()):,} px (+{kazanc:,} taban) | desi "
                      f"{en*boy*yuk/3e6:.2f}{uyari}", fg=renk)
             self._son_olcum = (en, boy, yuk)
         except Exception as ex:

@@ -83,3 +83,4 @@ tarih,saat,asama,parametre,ayar,deger,birim,not
 2026-08-18,09:41,kalibrasyon,fx_sag_K2,2048x1536,1290.8,px,ham intrinsik
 2026-08-18,09:41,kalibrasyon,fx_rektifiye_P1,2048x1536,1418.2,px,mesafe hesabinda kullanilan
 2026-08-18,15:49,olcum,en_boy_yuk,,0.3x0.3x0.2,mm,GECERSIZ - birim hatasi (metre mm yazildi) + sahne kalabalik, olcum hali/tahtayi da kapsadi. Rapora GIRMEZ.
+2026-08-19,13:46,olcum,en_boy_yuk,,1491.5x359.2x292.5,mm,GECERSIZ - zemin duzlemi 80 derece (kameraya kenardan bakiyor), bolge masaya kacti. Rapora GIRMEZ.
