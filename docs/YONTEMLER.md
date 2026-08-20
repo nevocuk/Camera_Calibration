@@ -536,7 +536,29 @@ bozuyor (kapsam %99 -> %60-82, saflik %93 -> %45-69): WLS ile
 yumusatilmis derinlik haritasinin kenarlari parlaklik kadar keskin
 degil.
 
-### C) Hangi durumda hangisi
+### C) EN IYI KURULUM - once buna bak (2026-08-20 olculdu)
+
+Yontem secmeden once **geometriyi** duzelt. Ayni kod, ayni ayarlar,
+termos (gercek 250 x 72 mm):
+
+| Bakis | Z | tol 15/30/60 -> UZUN | Yayilim |
+|---|---|---|---|
+| **YANDAN, cisim DIK** | 610-625 mm | 252-257 mm | **0.0-0.7 mm** |
+| Tepeden, yatik | 561 mm | 270.9 / 290.5 / 310.1 | 39 mm |
+| Tepeden, yatik | 718 mm | 177.8 / 204.7 / 264.6 | 87 mm |
+
+Asil kazanc dogruluk degil **toleransa duyarsizlik**: iyi kurulumda
+sonuc ayardan bagimsiz, kotu kurulumda 39-87 mm oynuyor.
+
+Kotu geometride hicbir ayar kurtarmiyor (141234, 718 mm):
+gri 45 -> 204.8 | gri 90 -> 205.2 | gri kapali + kenar 30 -> 203.7 |
++ basamak 3 -> 203.7 | watershed 250 -> 214.6. Hepsi ayni yerde.
+
+**Onerilen:** kamera cisme YANDAN baksin, 550-650 mm, cisim DIK.
+Ayarlar `tol 30, gri 35, sinir 300`, deneyseller kapali
+(Olcum tabinda "Onerilen ayarlar" butonu bunu yukler).
+
+### D) Hangi durumda hangisi
 
 | Durum | Yontem |
 |---|---|
