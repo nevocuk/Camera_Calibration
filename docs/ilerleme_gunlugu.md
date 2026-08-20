@@ -1011,6 +1011,83 @@ pencere nesnesi ve icerik dogrulandi.
 | `src/kutu_gorsel.py` | `--kenar --basamak --yukseklik --watershed --zemin` |
 | `src/camera_test.py` | Ipucu altyapisi, duzlem dogrulama, negatif esik, 4 yeni segmentasyon kutusu |
 
+
+### GERIYE MI GITTIK? Olculdu - HAYIR, ama geometri bozuldu (2026-08-20)
+
+Sikayet: son olcumler kotulesti. Ayni cekimde eski ve yeni yol
+karsilastirildi (`q_20260820_141234`, tikla 1076,674):
+
+| Ayar | UZUN |
+|---|---|
+| Kullanicinin ayari (kenar 50 + basamak 50) | 203.9 mm |
+| **Eski varsayilan (kenar/basamak hic yok)** | **204.8 mm** |
+
+Yeni secenekler o karede **hicbir sey degistirmemis**; eski kod da
+ayni sonucu verirdi. Kod geriye gitmemis.
+
+**Degisen sey GEOMETRI.** Ayni kod, ayni ayarlar, farkli cekimler
+(termos, gercek 250 x 72 mm):
+
+| Cekim | Z | Bakis | tol 15/30/60 -> UZUN | Yayilim |
+|---|---|---|---|---|
+| 170641 | 610 mm | YANDAN, dik | 252.3 / 252.2 / 252.2 | **0.1 mm** |
+| 172145 | 609 mm | YANDAN, dik | 256.8 / 256.8 / 256.8 | **0.0 mm** |
+| 172354 | 625 mm | YANDAN, dik | 254.5 / 255.2 / 255.2 | 0.7 mm |
+| 093039 | 561 mm | tepeden, yatik | 270.9 / 290.5 / 310.1 | **39 mm** |
+| 141234 | 718 mm | tepeden, yatik | 177.8 / 204.7 / 264.6 | **87 mm** |
+
+Asil fark dogruluk degil **toleransa duyarsizlik**: iyi kurulumda
+sonuc tolerans ayarindan bagimsiz, kotu kurulumda 39-87 mm oynuyor.
+
+**Neden 718 mm kotu:** derinlik hassasiyeti mesafenin KARESIYLE
+kotulesiyor - 560 mm'de 3.09 mm/px, 718 mm'de 5.06 mm/px (%64 daha
+gurultulu) ve cisim cercevede kuculuyor.
+
+**Parlaklik/engel ayarlari sinirlayici DEGIL** (141234 uzerinde):
+
+| Ayar | UZUN |
+|---|---|
+| gri 45 | 204.8 |
+| gri 90 | 205.2 |
+| gri KAPALI + kenar 30 | 203.7 |
+| gri kapali + kenar 20 + basamak 3 | 203.7 |
+| watershed 250 | 214.6 |
+
+Hepsi ayni yerde duruyor - sinirlayici mesafe.
+
+### SADELESTIRME (2026-08-20)
+
+Yukaridaki olcum uzerine Olcum tabi sadelestirildi. Deneysel
+kontroller SILINMEDI (olculmus bilgiyi kaybetmemek icin) ama
+gunluk kullanimda gorunmuyorlar.
+
+**Onde kalan (kanitlanmis):** tol mm, gri tol, sinir, masayi at,
+zemin haritasi, Kutu gorseli, Duzlemle olc.
+
+**"Deneysel yontemler (kotu geometri icin)" bolumune alinan,
+VARSAYILAN KAPALI:** kenar, basamak, yukseklik, watershed.
+Gerekce: dordunun de IYI geometride sonucu degistirmedigi olculdu
+(170641'de kenar/basamak acik ve kapali sonuc ayni).
+
+**Eklenen "Onerilen ayarlar" butonu** her seyi olculen en iyi
+degerlere dondurur: tol 30, gri 35, sinir 300, deneyseller sifir.
+Bu ayarlarla uc iyi cekimde dogrulandi: 252.2-256.8 mm.
+
+**Tabin ustune kalici rehber eklendi:** "kamera cisme YANDAN
+baksin, mesafe 550-650 mm, cisim DIK dursun".
+
+`sinir` varsayilani 250 -> 300 yapildi. Sebep: `sinir` tohumdan
+YARICAP; 250 mm'lik bir cismin ucuna tiklanirsa diger uc sinirin
+disinda kalabilir. Uc iyi cekimde 250 ve 300 ayni sonucu veriyor,
+yani degisiklik zararsiz.
+
+### Zemin duzlemi 14:08'de yine kaydi
+`q_20260820_141234` uzerinde: kayitli duzlem 489 mm, sahnenin
+gercek duzlemi 529 mm, fark **41 mm**. Tohumun duzleme gore
+yuksekligi **-128 mm** (duzlemin ALTINDA), bu yuzden `yukseklik`
+kriteri hic sonuc uretmedi. Duzlem sorunu (ChArUco periyodik deseni)
+hala acik.
+
 ---
 
 ## Yapilacaklar / Sonraki Adimlar

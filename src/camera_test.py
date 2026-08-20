@@ -1752,13 +1752,43 @@ class CameraApp:
         # sigmiyordu - sagdaki kutular ve iki buton ekran disinda
         # kaliyordu. Dort mantiksal gruba bolundu; her grubun basinda
         # ne ise yaradigini soyleyen kucuk bir baslik var.
-        def _grup(baslik_metni):
-            tk.Label(c, text=baslik_metni, bg=CARD, fg=ACCENT,
+        def _grup(baslik_metni, ust=None):
+            hedef = ust if ust is not None else c
+            tk.Label(hedef, text=baslik_metni, bg=CARD, fg=ACCENT,
                      font=("Segoe UI", 8, "bold"), anchor="w"
                      ).pack(fill=tk.X, pady=(6, 0))
-            f = tk.Frame(c, bg=CARD)
+            f = tk.Frame(hedef, bg=CARD)
             f.pack(fill=tk.X, pady=(0, 2))
             return f
+
+        # OLCULEN EN IYI KURULUM (2026-08-20, termos 250 x 72 mm):
+        # kamera cisme YANDAN bakarken (masa duzlemi ~80 derece),
+        # mesafe 550-650 mm, cisim DIK:
+        #    170641  tol 15/30/60 -> 252.3 / 252.2 / 252.2  (yayilim 0.1)
+        #    172145  tol 15/30/60 -> 256.8 / 256.8 / 256.8  (yayilim 0.0)
+        #    172354  tol 15/30/60 -> 254.5 / 255.2 / 255.2  (yayilim 0.7)
+        # Tepeden bakis ya da uzak mesafe ayni kodla bozuluyor:
+        #    093039 (561 mm, tepeden) -> 270.9 / 290.5 / 310.1 (39 mm)
+        #    141234 (718 mm, tepeden) -> 177.8 / 204.7 / 264.6 (87 mm)
+        # Asil kazanc dogruluk degil, toleransa DUYARSIZLIK.
+        rehber = tk.Label(
+            c, bg=CARD, fg=GREEN, font=("Segoe UI", 8), justify="left",
+            anchor="w", wraplength=620,
+            text=("OLCULEN EN IYI KURULUM: kamera cisme YANDAN baksin, "
+                  "mesafe 550-650 mm, cisim DIK dursun. Bu kurulumda "
+                  "sonuc tolerans ayarindan bagimsiz cikiyor (yayilim "
+                  "0.1 mm); tepeden bakista ya da 700 mm'de ayni kod "
+                  "39-87 mm oynuyor."))
+        rehber.pack(fill=tk.X, pady=(2, 0))
+        ipucu(rehber,
+              "Olculen sonuclar (termos, gercek 250 x 72 mm):\n\n"
+              "YANDAN, 610-625 mm, cisim dik:\n"
+              "   252.3 / 252.2 / 252.2 mm   (tol 15/30/60)\n"
+              "   256.8 / 256.8 / 256.8 mm\n"
+              "   254.5 / 255.2 / 255.2 mm\n\n"
+              "TEPEDEN, 561 mm: 270.9 / 290.5 / 310.1 mm\n"
+              "TEPEDEN, 718 mm: 177.8 / 204.7 / 264.6 mm\n\n"
+              "Ayni kod, ayni ayarlar - fark yalnizca GEOMETRI.")
 
         sat_bolge = _grup("Bolge secimi - derinlik toleransi")
         btn_row2 = sat_bolge          # ilk grup bu cercevede
@@ -1826,7 +1856,22 @@ class CameraApp:
         sp_sn.pack(side=tk.LEFT)
         ipucu(sp_sn, IP_SINIR)
         soru(btn_row2, IP_SINIR).pack(side=tk.LEFT, padx=(2, 0))
-        btn_row2 = _grup("Engeller - bolgenin cismin sinirini asmasini onler (istege bagli)")
+        # DENEYSEL: bu dort kontrol yalnizca KOTU geometride (tepeden
+        # bakis, uzak mesafe) ise yariyor ve hicbiri iyi kurulumda
+        # sonucu degistirmiyor - olculdu, 170641'de kenar/basamak acik
+        # ve kapali sonuc ayni. Varsayilan olarak KAPALI bir bolume
+        # alindi ki gunluk kullanimda gorunmesinler.
+        deneysel = self._section(
+            tab, "Deneysel yontemler (kotu geometri icin)",
+            katlanabilir=True, acik=False)
+        tk.Label(deneysel, bg=CARD, fg=MUTED, font=("Segoe UI", 8),
+                 justify="left", anchor="w", wraplength=600,
+                 text=("Bunlarin hicbiri iyi kurulumda sonucu "
+                       "degistirmiyor (olculdu). Once geometriyi "
+                       "duzelt; ancak duzeltemiyorsan buraya bak.")
+                 ).pack(fill=tk.X)
+        btn_row2 = _grup("Engeller - bolgenin cismin sinirini asmasini "
+                         "onler", ust=deneysel)
         IP_KENAR = ("PARLAKLIK BASAMAGI engeli (|grad I|). 0 = kapali.\n\n"
                     "'gri tol' bir SEVIYE esigidir: tohumdan cok farkli "
                     "parlaklikta olan HER pikseli atar, yani cismin kendi "
@@ -1874,7 +1919,8 @@ class CameraApp:
         sp_bs.pack(side=tk.LEFT)
         ipucu(sp_bs, IP_BAS)
         soru(btn_row2, IP_BAS).pack(side=tk.LEFT, padx=(2, 0))
-        btn_row2 = _grup("Alternatif kriter - biri secilirse YUKARIDAKILER KULLANILMAZ")
+        btn_row2 = _grup("Alternatif kriter - biri secilirse "
+                         "YUKARIDAKILER KULLANILMAZ", ust=deneysel)
         IP_YUK = ("YUKSEKLIK KRITERI (mm). 0 = kapali.\n\n"
                   "Bolgeyi derinlik toleransiyla degil, 'zemin "
                   "duzleminden en az bu kadar yukarida' olcutuyle secer. "
@@ -1932,6 +1978,11 @@ class CameraApp:
         ipucu(sp_ws, IP_WS)
         soru(btn_row2, IP_WS).pack(side=tk.LEFT, padx=(2, 0))
         btn_row2 = _grup("Secenekler ve cikti")
+        tk.Button(btn_row2, text="Onerilen ayarlar",
+                  command=self._onerilen_olcum_ayarlari,
+                  bg="#2d5a3d", fg="white", font=("Segoe UI", 9),
+                  relief="flat", padx=8, pady=2,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(0, 8))
         cb_dz = tk.Checkbutton(btn_row2, text="masayi at",
                                variable=self.pca_duzlem_var,
                                bg=CARD, fg=FG, selectcolor=BG,
@@ -4604,6 +4655,29 @@ class CameraApp:
         if r >= 0.60 * uzun_kenar:          # duz yuzey, dev yaricap
             return False, None
         return (kal / r) < 0.06, 2.0 * r
+
+    def _onerilen_olcum_ayarlari(self):
+        """Olcum ayarlarini OLCULEN en iyi degerlere dondur.
+
+        Bu degerler tahmin degil: 2026-08-20'de termos (250 x 72 mm)
+        uzerinde uc cekimde dogrulandi. Yandan bakis, 610-625 mm:
+        tol 15/30/60 arasinda sonuc 252.2-256.8 mm ve yayilim 0.1 mm.
+        Deneysel kontroller (kenar/basamak/yukseklik/watershed) o
+        kurulumda sonucu degistirmediginden sifirlanir.
+        """
+        self.pca_tol_var.set(30)
+        self.pca_gri_var.set(35)
+        self.pca_sinir_var.set(300)
+        self.pca_kenar_var.set(0)
+        self.pca_basamak_var.set(0.0)
+        self.pca_yukseklik_var.set(0)
+        self.pca_watershed_var.set(0)
+        self.pca_duzlem_var.set(False)
+        self.pca_zemin_var.set(False)
+        self.lbl_meas_status.config(
+            text="Onerilen ayarlar yuklendi (tol 30, gri 35, sinir 300, "
+                 "deneyseller kapali). Kamera cisme YANDAN baksin, "
+                 "550-650 mm.", fg=GREEN)
 
     def _save_box_visual(self):
         """Olculen 3B kutuyu goruntu uzerine cizip kaydet.

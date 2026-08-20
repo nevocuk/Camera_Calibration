@@ -178,6 +178,28 @@ kisa ekseni gercek capin cok altinda cikar (11-28 mm olculdu, gercek
 kalinti/yaricap < 0.06 ve yaricap < 0.60 x uzun kenar. Duzlem acisi
 60 dereceyi asiyorsa duzeltme uygulanmaz (yay cok kisa).
 
+### En iyi olcum kurulumu OLCULDU (2026-08-20)
+Ayni kod ve ayarlarla, termos (gercek 250 x 72 mm):
+
+| Bakis | Z | tol 15/30/60 -> UZUN | Yayilim |
+|---|---|---|---|
+| **YANDAN, cisim dik** | 610-625 mm | 252-257 mm | **0.0-0.7 mm** |
+| Tepeden, yatik | 561 mm | 270.9 / 290.5 / 310.1 | 39 mm |
+| Tepeden, yatik | 718 mm | 177.8 / 204.7 / 264.6 | 87 mm |
+
+Asil kazanc dogruluk degil **toleransa duyarsizlik**. Rapor
+olcumlerinin tamami yandan bakisla, 550-650 mm'de alinmali.
+
+Derinlik hassasiyeti mesafenin karesiyle kotulesir: 560 mm'de
+3.09 mm/px, 718 mm'de 5.06 mm/px.
+
+### Deneysel kontroller varsayilan GIZLI (2026-08-20)
+`kenar`, `basamak`, `yukseklik`, `watershed` yalnizca kotu
+geometride ise yariyor; iyi kurulumda sonucu hic degistirmedikleri
+olculdu. Olcum tabinda "Deneysel yontemler" adli KAPALI bir bolume
+alindilar. "Onerilen ayarlar" butonu hepsini sifirlar ve
+kanitlanmis degerleri yukler (tol 30, gri 35, sinir 300).
+
 ### Segmentasyon: BES yontem, ucu ise yariyor (2026-08-20)
 Ayni soruya cevap ariyorlar: "tiklanan piksel hangi cisme ait?"
 
