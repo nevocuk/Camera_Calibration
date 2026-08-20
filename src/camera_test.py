@@ -1705,6 +1705,15 @@ class CameraApp:
         # degismesin diye.
         self.pca_kenar_var = tk.IntVar(value=0)
         self.pca_basamak_var = tk.DoubleVar(value=0.0)
+        # YUKSEKLIK KRITERI: derinlik toleransi yerine "duzlemden en az
+        # su kadar yukarida" olcutu. Ayakta duran cisme TEPEDEN
+        # bakildiginda sart - uzun eksen bakis dogrultusuna dondugu icin
+        # derinlik toleransi cismin ancak bir dilimini kapsar.
+        # Olculdu (q_20260820_110729, ayakta sise, tikla 1049,581):
+        #   derinlik toleransi tol 15/30/60 -> 65 / 83 / 158 mm
+        #   yukseklik kriteri  h 15/25, yanal 45/70 -> 248 / 247 / 248 / 247
+        # VARSAYILAN KAPALI (0).
+        self.pca_yukseklik_var = tk.IntVar(value=0)
         self.pca_duzlem_var = tk.BooleanVar(value=False)
         # Kutu gorselini ZEMIN CIKARILMIS haritadan uret. Olculdu
         # (q_20260819_170641, termos 250x72x36, tikla 1373,1045):
@@ -1836,6 +1845,33 @@ class CameraApp:
         sp_bs.pack(side=tk.LEFT)
         ipucu(sp_bs, IP_BAS)
         soru(btn_row2, IP_BAS).pack(side=tk.LEFT, padx=(2, 0))
+        IP_YUK = ("YUKSEKLIK KRITERI (mm). 0 = kapali.\n\n"
+                  "Bolgeyi derinlik toleransiyla degil, 'zemin "
+                  "duzleminden en az bu kadar yukarida' olcutuyle secer. "
+                  "Tolerans hic kullanilmaz, dolayisiyla sonuc ona "
+                  "duyarsizdir.\n\n"
+                  "NE ZAMAN: cisim AYAKTA duruyor ve kamera TEPEDEN "
+                  "bakiyorsa sart. O durumda cismin uzun ekseni bakis "
+                  "dogrultusuna doner; tabandan tepeye derinlik surekli "
+                  "degisir ve tolerans cismin ancak bir dilimini kapsar.\n\n"
+                  "Olculdu (ayakta sise, tepeden, gercek ~250 mm):\n"
+                  "  derinlik toleransi 15/30/60 -> 65 / 83 / 158 mm\n"
+                  "  yukseklik kriteri            -> 248 / 247 / 248 / 247\n\n"
+                  "Bu modda 'sinir mm' YANAL yaricap olur (duzlem "
+                  "uzerinde), onerilen 45-70. Yukseklik serbest kalir.\n\n"
+                  "SARTI: gecerli bir zemin duzlemi ve cismin duzlemin "
+                  "uzerinde durmasi. Onerilen deger: 15-25")
+        lbl_yk = tk.Label(btn_row2, text="yukseklik:", bg=CARD, fg=MUTED,
+                          font=("Segoe UI", 8))
+        lbl_yk.pack(side=tk.LEFT, padx=(6, 2))
+        ipucu(lbl_yk, IP_YUK)
+        sp_yk = tk.Spinbox(btn_row2, from_=0, to=200, increment=5, width=4,
+                           textvariable=self.pca_yukseklik_var, bg=BG, fg=FG,
+                           buttonbackground=BORDER, relief="flat",
+                           font=("Segoe UI", 9))
+        sp_yk.pack(side=tk.LEFT)
+        ipucu(sp_yk, IP_YUK)
+        soru(btn_row2, IP_YUK).pack(side=tk.LEFT, padx=(2, 0))
         cb_dz = tk.Checkbutton(btn_row2, text="masayi at",
                                variable=self.pca_duzlem_var,
                                bg=CARD, fg=FG, selectcolor=BG,
@@ -4540,7 +4576,8 @@ class CameraApp:
                  "--tol", str(self.pca_tol_var.get()),
                  "--gri", str(self.pca_gri_var.get()),
                  "--kenar", str(self.pca_kenar_var.get()),
-                 "--basamak", str(self.pca_basamak_var.get())]
+                 "--basamak", str(self.pca_basamak_var.get()),
+                 "--yukseklik", str(self.pca_yukseklik_var.get())]
                 + (["--zemin"] if self.pca_zemin_var.get() else []),
                 capture_output=True, text=True, timeout=90)
             cikti = (r.stdout or "") + (r.stderr or "")

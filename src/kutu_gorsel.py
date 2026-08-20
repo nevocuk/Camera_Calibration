@@ -180,6 +180,54 @@ def zemin_duzlemi(calib):
     return n, float(g["d"]) * 1000.0, None
 
 
+def segmentle_yukseklik(dsp, pts, sx, sy, n_duz, d_mm, h_min, yanal_mm):
+    """Derinlik yerine DUZLEMDEN YUKSEKLIK ile bolge sec.
+
+    NEDEN GEREKLI: derinlik toleransiyla bolge buyutme, cismin
+    goruntu duzlemine PARALEL uzandigi durumda calisir. Cisim ayakta
+    dururken kameraya tepeden bakilirsa uzun eksen BAKIS
+    DOGRULTUSUNA doner; tabandan tepeye derinlik surekli degisir ve
+    tolerans cismin ancak bir dilimini kapsar.
+
+    Olculdu (q_20260820_110729, ayakta sise, tepeden, tikla 1049,581):
+       derinlik toleransi tol 15/30/60 -> UZUN 70 / 93 / 164 mm
+       yukseklik kriteri (h>=15, yanal 45) -> 239 mm, taban ile 254 mm
+       yukseklik kriteri (h>=25, yanal 45) -> 228 mm, taban ile 253 mm
+    Ayrica tol'a duyarsiz: kriterde tolerans hic kullanilmiyor.
+
+    SARTI: gecerli bir zemin duzlemi. Cisim duzlemin uzerinde
+    durmali; havada tutulan cisimde taban geri kazanimi yaniltir.
+
+    h_min    : duzlemden en az bu kadar yukarida olan pikseller
+    yanal_mm : tohumdan DUZLEM UZERINDE en fazla bu kadar uzak
+               (3B kus ucusu degil - yukseklik serbest kalmali)
+    """
+    gec = (dsp > 0) & np.isfinite(pts).all(axis=2)
+    if not gec[sy, sx]:
+        return None, "tiklanan noktada disparity yok"
+    h = np.full(dsp.shape, -1e9, np.float32)
+    h[gec] = pts[gec] @ n_duz + d_mm
+    # duzlem uzerinde iki dik eksen
+    u = (np.cross(n_duz, [1.0, 0.0, 0.0]) if abs(n_duz[0]) < 0.9
+         else np.cross(n_duz, [0.0, 1.0, 0.0]))
+    u = u / np.linalg.norm(u)
+    v = np.cross(n_duz, u)
+    D = pts - pts[sy, sx]
+    yanal = np.full(dsp.shape, 1e9, np.float32)
+    yanal[gec] = np.hypot(D[gec] @ u, D[gec] @ v)
+    m = (gec & (h >= h_min) & (yanal <= yanal_mm)).astype(np.uint8)
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE,
+                         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    nl, lab, st, _ = cv2.connectedComponentsWithStats(m, 8)
+    if lab[sy, sx] == 0:
+        return None, (f"tiklanan nokta bolgede degil - tohum duzlemden "
+                      f"{h[sy, sx]:.0f} mm yukarida, esik {h_min:.0f} mm")
+    m = (lab == lab[sy, sx]) & gec
+    if m.sum() < 500:
+        return None, f"bolge cok kucuk ({int(m.sum())} px)"
+    return m, None
+
+
 def taban_geri_kazan(boy, alt, ust, Vt, orta, P, n, d_mm):
     """Zemin cikarma esigi cismin ALT kismini de kesiyor (tanim geregi:
     duzlemin esik kadar ustundeki her sey siliniyor). Kesilen band
@@ -301,6 +349,15 @@ def main():
                          "cisim siniri 10+ mm/px; iyi deger 3. "
                          "Cismin yuzeye DEGDIGI yerde basamak yoktur, "
                          "tek basina yetmez - gri/kenar ile birlikte kullan.")
+    ap.add_argument("--yukseklik", type=float, default=0.0,
+                    help="YUKSEKLIK KRITERI (mm). 0 = kapali. Bolge, "
+                         "derinlik toleransi yerine 'duzlemden en az bu "
+                         "kadar yukarida' olcutuyle secilir. Ayakta duran "
+                         "cisme TEPEDEN bakarken sart: olculdu, derinlik "
+                         "toleransi 70/93/164 mm verirken yukseklik "
+                         "kriteri 254 mm verdi (gercek 250). Bu modda "
+                         "--sinir YANAL yaricap olur (onerilen 45-70) ve "
+                         "--tol kullanilmaz. Zemin duzlemi gerekir.")
     ap.add_argument("--zemin", action="store_true",
                     help="zemin cikarilmis haritayi kullan + kesilen tabani "
                          "geri ekle. Sonucu tol/parlaklik ayarina duyarsiz "
@@ -334,9 +391,19 @@ def main():
 
     f_px = float(c['P1'][0, 0])
     B_mm = float(np.linalg.norm(c['T'])) * 1000.0
-    m, hata = segmentle(dsp, pts, sx, sy, a.sinir, a.tol,
-                        f_px, B_mm, gri=z["gray_l"], gri_tol=a.gri,
-                        kenar_esik=a.kenar, basamak_mm=a.basamak)
+    if a.yukseklik > 0:
+        yn, yd, yhata = zemin_duzlemi(c)
+        if yn is None:
+            print("HATA:", yhata)
+            return 1
+        m, hata = segmentle_yukseklik(dsp, pts, sx, sy, yn, yd,
+                                      a.yukseklik, a.sinir)
+        if zn is None:                 # taban geri kazanimi icin gerekli
+            zn, zd = yn, yd
+    else:
+        m, hata = segmentle(dsp, pts, sx, sy, a.sinir, a.tol,
+                            f_px, B_mm, gri=z["gray_l"], gri_tol=a.gri,
+                            kenar_esik=a.kenar, basamak_mm=a.basamak)
     if m is None:
         print("HATA:", hata); return 1
     d_oran = 0.0
@@ -351,7 +418,7 @@ def main():
     P = pts[m]
     boy, koseler, Vt, orta, pr, alt, ust = kutu_hesapla(P)
     geri, geri_eks = 0.0, -1
-    if a.zemin and zn is not None:
+    if (a.zemin or a.yukseklik > 0) and zn is not None:
         boy, alt, ust, geri, geri_eks = taban_geri_kazan(
             boy, alt, ust, Vt, orta, P, zn, zd)
         if geri > 0:
@@ -364,6 +431,9 @@ def main():
           f"derinlik tol {a.tol:.0f} mm  gri tol {a.gri:.0f}"
           + (f"  kenar {a.kenar:.0f}" if a.kenar else "")
           + (f"  basamak {a.basamak:.1f} mm/px" if a.basamak else ""))
+    kriter = (f"YUKSEKLIK (h>={a.yukseklik:.0f} mm, yanal {a.sinir:.0f} mm)"
+              if a.yukseklik > 0 else "derinlik toleransi")
+    print(f"KRITER : {kriter}")
     print(f"HARITA : {'zemin cikarilmis' if a.zemin else 'ham (zemin duruyor)'}"
           + (f"  esik {float(z['zemin_esik_mm']):.0f} mm"
              if a.zemin and "zemin_esik_mm" in z.files else ""))
