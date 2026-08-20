@@ -28,8 +28,46 @@ CAP_DIR = os.path.join(PROJECT_DIR, "output", "depth_captures")
 CALIB = os.path.join(PROJECT_DIR, "calibration", "calib_result.npz")
 
 
+def basamak_haritasi(dsp, pts, yumusat=3):
+    """Her pikselde derinligin komsuya gore degisimi: |grad Z| (mm/piksel).
+
+    NEDEN: 'gri tol' bir SEVIYE esigidir ve cisme bagimlidir - koyu
+    termos/beyaz masada 35 iyi calisir, acik renkli bir cisimde hic
+    calismaz. Derinlik BASAMAGI ise cisme bagli degil: bir cismin
+    silueti destek yuzeyine gore sicrama yapar, duz bir yuzeyde ise
+    komsu pikseller arasi degisim gurultu mertebesindedir.
+
+    Olculen referanslar (2026-08-20):
+      masa yuzeyinde yerel sacilim   1.15 mm  (0.44 px disparity gurultusu)
+      yanal piksel adimi Z/f         0.36 mm @ 516 mm
+      26 derece egimde yuzey degisimi ~0.18 mm/px
+      |grad Z| dagilimi: %50 -> 0.23, %75 -> 1.90, %90 -> 10.65 mm/px
+    Yani gercek yuzey ~1-2 mm/px, cisim siniri 10+ mm/px. Esik arada
+    olmali; olculen en iyi deger 3 mm/px.
+
+    SINIR: cisim destek yuzeyine DEGDIGI yerde basamak yoktur (yatik
+    silindir masaya tegettir). Orada tek basina yetmez, gri/kenar
+    kisitlariyla BIRLIKTE kullanilmali.
+    """
+    Z = np.nan_to_num(pts[:, :, 2], nan=0.0).astype(np.float32)
+    gec = dsp > 0
+    if yumusat:
+        Z = cv2.GaussianBlur(Z, (yumusat, yumusat), 0)
+    g = np.hypot(cv2.Sobel(Z, cv2.CV_32F, 1, 0, ksize=3) / 8.0,
+                 cv2.Sobel(Z, cv2.CV_32F, 0, 1, ksize=3) / 8.0)
+    g[~gec] = np.float32(1e6)          # gecersiz piksel = duvar
+    return g
+
+
+def kenar_haritasi(gri, yumusat=5):
+    """Parlaklik basamagi |grad I|. Nesne sinirini duvar yapar."""
+    bl = cv2.GaussianBlur(gri, (yumusat, yumusat), 0).astype(np.float32)
+    return np.hypot(cv2.Sobel(bl, cv2.CV_32F, 1, 0, ksize=3),
+                    cv2.Sobel(bl, cv2.CV_32F, 0, 1, ksize=3))
+
+
 def segmentle(dsp, pts, sx, sy, sinir, tol_mm=40.0, f=None, B=None,
-              gri=None, gri_tol=0):
+              gri=None, gri_tol=0, kenar_esik=0, basamak_mm=0.0):
     """tol_mm: DERINLIK toleransi (mm). Disparity'ye mesafeye gore cevrilir.
 
     Sabit disparity toleransi kullanmak YANLIS: olculdu, 6 px 730 mm'de
@@ -58,6 +96,20 @@ def segmentle(dsp, pts, sx, sy, sinir, tol_mm=40.0, f=None, B=None,
         dsp[fark > gri_tol] = 0
         if dsp[sy, sx] <= 0:
             return None, "tohum parlaklik filtresine takildi"
+    # KENAR ENGELI: parlaklik basamagi. Seviye esiginin (gri_tol)
+    # aksine cismin ici farkli parlakliktaysa da calisir - yalnizca
+    # SINIRI duvar yapar, ici serbest birakir.
+    if gri is not None and kenar_esik > 0:
+        dsp = dsp.copy()
+        dsp[kenar_haritasi(gri) > kenar_esik] = 0
+        if dsp[sy, sx] <= 0:
+            return None, "tohum kenar engeline denk geldi"
+    # BASAMAK ENGELI: derinlik basamagi (mm/piksel). Cisme bagli degil.
+    if basamak_mm and basamak_mm > 0:
+        dsp = dsp.copy()
+        dsp[basamak_haritasi(dsp, pts) > float(basamak_mm)] = 0
+        if dsp[sy, sx] <= 0:
+            return None, "tohum derinlik basamagina denk geldi"
     m0 = np.zeros((H + 2, W + 2), np.uint8)
     im = dsp.astype(np.float32).copy()
     cv2.floodFill(im, m0, (sx, sy), 0, loDiff=tol, upDiff=tol,
@@ -238,6 +290,17 @@ def main():
                     help="parlaklik toleransi (0-255). 0 = kapali")
     ap.add_argument("--tol", type=float, default=30.0,
                     help="DERINLIK toleransi (mm) - disparity degil")
+    ap.add_argument("--kenar", type=float, default=0.0,
+                    help="PARLAKLIK basamagi engeli (|grad I|). 0 = kapali. "
+                         "Cismin sinirini duvar yapar; ici farkli "
+                         "parlakliktaysa gri_tol'un aksine bozmaz. "
+                         "Olculen iyi deger: 30")
+    ap.add_argument("--basamak", type=float, default=0.0,
+                    help="DERINLIK basamagi engeli (mm/piksel). 0 = kapali. "
+                         "Cisme bagli degil. Olculen: yuzey ~1-2 mm/px, "
+                         "cisim siniri 10+ mm/px; iyi deger 3. "
+                         "Cismin yuzeye DEGDIGI yerde basamak yoktur, "
+                         "tek basina yetmez - gri/kenar ile birlikte kullan.")
     ap.add_argument("--zemin", action="store_true",
                     help="zemin cikarilmis haritayi kullan + kesilen tabani "
                          "geri ekle. Sonucu tol/parlaklik ayarina duyarsiz "
@@ -272,7 +335,8 @@ def main():
     f_px = float(c['P1'][0, 0])
     B_mm = float(np.linalg.norm(c['T'])) * 1000.0
     m, hata = segmentle(dsp, pts, sx, sy, a.sinir, a.tol,
-                        f_px, B_mm, gri=z["gray_l"], gri_tol=a.gri)
+                        f_px, B_mm, gri=z["gray_l"], gri_tol=a.gri,
+                        kenar_esik=a.kenar, basamak_mm=a.basamak)
     if m is None:
         print("HATA:", hata); return 1
     d_oran = 0.0
@@ -297,7 +361,9 @@ def main():
     print("=" * 60)
     print(f"CEKIM  : {os.path.basename(yol)}")
     print(f"TIKLAMA: ({sx},{sy})  sinir {a.sinir:.0f} mm  "
-          f"derinlik tol {a.tol:.0f} mm  gri tol {a.gri:.0f}")
+          f"derinlik tol {a.tol:.0f} mm  gri tol {a.gri:.0f}"
+          + (f"  kenar {a.kenar:.0f}" if a.kenar else "")
+          + (f"  basamak {a.basamak:.1f} mm/px" if a.basamak else ""))
     print(f"HARITA : {'zemin cikarilmis' if a.zemin else 'ham (zemin duruyor)'}"
           + (f"  esik {float(z['zemin_esik_mm']):.0f} mm"
              if a.zemin and "zemin_esik_mm" in z.files else ""))
