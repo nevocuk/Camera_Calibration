@@ -3684,7 +3684,45 @@ class CameraApp:
             # cikar ama duzlem yanlis yerdedir. Sahnenin kendi baskin
             # duzlemiyle karsilastirip kullaniciya SAYIYLA soyluyoruz.
             sapma_metni, sapma_renk = "", None
+            # ONCE DERINLIGIN KENDISI SAGLAM MI? Kontrol, sahnenin
+            # duzlemini derinlikten cikariyor; derinlik bozuksa uyari
+            # da yanlis olur. Olculdu 2026-08-20: ChArUco tekrarli bir
+            # desen ve blok esleme bazen yanlis kareye kilitleniyor -
+            # q_20260820_105934'te DUZ tahtanin mesafesi 410..656 mm
+            # arasina yayildi, tahta uzerindeki disparity salinimi
+            # 37.4 px cikti (saglikli cekimde 8.9 px). O cekimde
+            # solvePnP ile derinlik 35 mm ayristi; 23 arsiv cekiminde
+            # ise medyan fark yalnizca 3.4 mm.
+            tahta_salinim = float("nan")
             try:
+                iyy = np.asarray(img_pts, np.float32).reshape(-1, 2)
+                kabb = cv2.convexHull(iyy).reshape(-1, 2)
+                merr = kabb.mean(axis=0)
+                mk_ = np.zeros(gray.shape[:2], np.uint8)
+                cv2.fillConvexPoly(
+                    mk_, (merr + (kabb - merr) * 0.85).astype(np.int32), 1)
+                dsp_t = getattr(self, "_pre_ground_dsp", None)
+                if dsp_t is None:
+                    with self._depth_lock:
+                        dsp_t = self._depth_olcum
+                if dsp_t is not None and dsp_t.shape[:2] == gray.shape[:2]:
+                    dv = dsp_t[(mk_ > 0) & (dsp_t > 0)]
+                    if dv.size > 500:
+                        tahta_salinim = float(np.std(dv))
+            except Exception:
+                pass
+            if np.isfinite(tahta_salinim) and tahta_salinim > 20.0:
+                sapma_metni = (
+                    f"  !! TAHTADA DERINLIK BOZUK: disparity salinimi "
+                    f"{tahta_salinim:.0f} px (saglikli deger <10). Duz bir "
+                    f"tahtada bu imkansiz - blok esleme tekrarli desende "
+                    f"yanlis kareye kilitlenmis. Tahtayi biraz UZAKLASTIR "
+                    f"ya da yanina dokulu bir sey koy; sahne karsilastirmasi "
+                    f"bu karede guvenilmez.")
+                sapma_renk = YELLOW
+            try:
+                if sapma_metni:
+                    raise StopIteration          # karsilastirmayi atla
                 dsp_k = getattr(self, "_pre_ground_dsp", None)
                 if dsp_k is None:
                     with self._depth_lock:
@@ -3718,6 +3756,8 @@ class CameraApp:
                         else:
                             sapma_metni = (f"  (sahneyle uyumlu: {d_ote:.0f} mm, "
                                            f"{d_aci:.1f} derece)")
+            except StopIteration:
+                pass
             except Exception:
                 pass
 
