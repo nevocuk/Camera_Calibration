@@ -1,7 +1,7 @@
 # Stereo Kamera Projesi — Tam Kontext Dokumani
 
 > Bu dosya, projeye sifirdan baslayacak bir modelin hizlica tam resmi gorebilmesi icin yazildi.
-> Son guncelleme: 2026-08-19.
+> Son guncelleme: 2026-08-20.
 >
 > **Yontem ayrintilari icin:** [YONTEMLER.md](YONTEMLER.md) — her
 > adimda hangi yontem, neden o yontem, hangi parametrelerle,
@@ -178,6 +178,46 @@ kisa ekseni gercek capin cok altinda cikar (11-28 mm olculdu, gercek
 kalinti/yaricap < 0.06 ve yaricap < 0.60 x uzun kenar. Duzlem acisi
 60 dereceyi asiyorsa duzeltme uygulanmaz (yay cok kisa).
 
+### Segmentasyon: BES yontem, ucu ise yariyor (2026-08-20)
+Ayni soruya cevap ariyorlar: "tiklanan piksel hangi cisme ait?"
+
+| # | Yontem | Durum |
+|---|---|---|
+| 1 | Derinlik toleransi (`tol`) | Cisim goruntu duzlemine paralelse calisir |
+| 2 | Parlaklik seviyesi (`gri`) | Kismen - cisme bagimli |
+| 3 | Kenar + basamak engelleri | Kismen - kararlilik kazandirir |
+| 4 | Yukseklik kriteri (`yukseklik`) | **Calisiyor** - duzlem gerekir |
+| 5 | Watershed (`watershed`) | **Calisiyor** - duzlem gerekmez |
+
+Referans olcum (ayakta sise, tepeden, gercek ~250 x 72 mm):
+
+| Yontem | Sonuc |
+|---|---|
+| Derinlik toleransi tol 15/30/60 | **65 / 83 / 158 mm** |
+| Yukseklik kriteri (4 ayar) | 248.4 / 247.4 / 247.7 / 247.0 |
+| Watershed (4 ayar) | **248.9 / 249.0 / 248.9 / 249.0** |
+
+**1-3'un yapisal siniri:** bir engel bolgeyi **buyutemez, yalnizca
+kucultebilir**. Cisim bakis dogrultusunda uzaniyorsa bolge zaten
+cismin ortasinda durur (olculdu: gercek cismin %25'i, durdugu yerdeki
+basamak 3.91 mm/px yani kenar YOK, gercek siluette 48.57 mm/px) ve
+engel hic devreye girmez.
+
+**4 ve 5 neden calisiyor:** yayilmiyorlar. Her piksel sabit bir
+referansa karsi olculur (duzlem yuksekligi / watershed isaretcisi),
+dolayisiyla ne erken durur ne kacar.
+
+**Kural:** kamera cismin en buyuk yuzlerini gormeli. **Kameraya
+dogru bakan eksen olculemeyen eksendir.** Tepeden bakis masada
+YATAN cisimler icin dogru, AYAKTA duran uzun cisim icin en kotu
+acidir (termos yatirilinca uzun eksen 78 -> 284 mm).
+
+### Kare olcusu DOGRULANDI (2026-08-20)
+Komsu ChArUco koselerinin 3B mesafesi 20 cekimde olculdu -
+`olculen_kare_boyutu_mm` degerini hic kullanmadan, yani dairesel
+olmayan bir kontrol: **medyan 20.05 mm**, salinim 0.36, config
+20.00 mm, oran 1.0023 (+%0.2). Config ve kalibrasyon olcegi dogru.
+
 ### Kaliteli Tek Kare (F modu) vs canli derinlik
 Canli derinlik ~3-5 fps, her frame farkli gurultu. Kaliteli kare: 10 farkli frame'in gray ortalamasini alarak sensor gurultusunu azaltir, sonra ayri (daha buyuk blockSize=9, daha yuksek WLS lambda=12000) SGBM ile isler. Sonuc daha temiz disparity haritasi. Hash-based frame change detection ile ayni frame'i tekrar almaz.
 
@@ -302,6 +342,51 @@ Kamera masaya ~80 derece ile bakiyor. Sonuclari:
 Parlaklik + kenar kisitlari bunun cogunu kurtariyor ama cisim koyu bir
 zeminde (orn. laptop) dururken yukseklikte ~%16 tasma kaliyor.
 60 derecelik kati kural **uyariya** cevrildi (kamera tasinamiyor).
+
+### ChArUco tekrarli desen: tahtada stereo esleme bozulabiliyor (2026-08-20)
+Tahta sahnedeyken olculdu - tahta masaya tam duz yatiyor (tahta ve
+cevre masa duzlemleri arasi aci 0.22 derece, kalinlik 2.1 mm), ama
+tahtanin UZERINDEKI derinlik bozuk:
+
+| | Bu cekim | Saglikli cekim |
+|---|---|---|
+| Tahtada mesafe dagilimi | **410 - 656 mm** | ~25 mm |
+| Disparity salinimi | **37.4 px** | 8.9 px |
+| Olculen kare boyu | 21.68 mm | 20.0 mm |
+
+Duz bir tahtanin mesafesi 250 mm'lik aralikta saçilamaz. ChArUco
+periyodik bir desen; blok esleme bazi bloklarda yanlis kareye
+kilitleniyor. Cevredeki duz beyaz masa temiz olculuyor (kalinti
+1.64 mm) - sorun desenin periyodikliginde.
+
+Uygulama artik tahtadaki disparity salinimi 20 px'i asarsa
+"TAHTADA DERINLIK BOZUK" uyarisi veriyor. Pratik cozum: tahtayi
+~650 mm'ye uzaklastir (saglikli tespitlerin hepsi 590-653 mm).
+
+### Zemin esigi negatif olabilir ama egimi telafi etmez (2026-08-20)
+Esik alt siniri -60 mm'ye acildi (tespit edilen duzlem masa degil
+tahtanin UST yuzeyi). Ama gercek masa pikselleri uzerinde olculdu:
+ortalama sapma -44.2 mm (esikle kapatilabilir), salinim 20.4 mm ve
+%5-%95 yayilimi 69 mm (kapatilamaz - egimden). Aci farki 7.8 derece,
+masanin gorunen genisligi 484 mm; 484 x tan(7.8) = 66 mm yayilimi
+tam olarak aciklıyor. Egik duzlem kaydirmakla duzelmez.
+
+### Gurultu darbogaz DEGIL - segmentasyon darbogaz (2026-08-20)
+46 adet 120x120 masa yamasinda yerel duzlemsel sacilim **1.15 mm**
+(0.44 px disparity gurultusu; olculen epipolar hata 0.420 px ile
+tutarli). Gordugumuz olcum hatalari 30-60 mm, yani sensor
+gurultusunun 30-50 kati.
+
+Gurultunun yone gore dagilimi (oran = Z/B):
+
+| Z | YANAL | DERINLIK | oran |
+|---|---|---|---|
+| 400 mm | 0.28 mm | 1.57 mm | 5.6x |
+| 550 mm | 0.39 mm | 2.97 mm | 7.7x |
+| 1000 mm | 0.71 mm | 9.82 mm | 13.9x |
+
+Sanal kamera dondurme bunu degistirmez (gurultu de doner). Baz
+uzunlugunu buyutmek de listede yok - gurultu zaten sinirlayici degil.
 
 ### Crosshair hizalama sorunu (cozuldu ama dikkat gerekli)
 Goruntu merkezindeki olcum noktasi cismin uzerine denk gelmeyebilir. Tiklayarak olcum eklendi ama kullanici bunu bilmeli. Ozellikle:
@@ -588,6 +673,35 @@ kaniti degil — yanlis bir bolge de tesadufen yakin sayi uretebilir.
 kutu cismi sariyorsa dogru, cevreye tasiyorsa bolge kacmis.
 **Bu yuzden renk kodu eklendi:** her ana eksenin kenarlari ve sol
 ustteki olcusu ayni renkte (UZUN yesil, ORTA acik mavi, KISA pembe).
+
+### Duvarlari floodFill'e verip toleransi serbest birakma (2026-08-20)
+**Ne oldu:** kenar/basamak engelleri cismin sinirini cok iyi buluyor
+(siluet |grad I| 108.3 vs cismin ici 5.7 - 19 kat ayrim). Toleransi
+serbest birakip durdurmayi duvarlara birakmak denendi.
+**Olculen:** kenar30+basamak3 kapsam %43 saflik %9; kenar20+basamak2
+%39 / %87; kenar80+basamak10 %98 / %17. Bosluk kapatma 3-9 px de
+duzeltmiyor.
+**Teknik neden:** TOPOLOJIK sart - floodFill'in tutmasi icin duvarin
+HER YERDE kapali olmasi gerekir. Olculdu: siluetin en fazla %86'si
+duvar oluyor, kalan %14'un tek pikselinden bolge kaciyor.
+**Cozum:** watershed - kapali cevrit gerektirmiyor (%99 kapsam,
+%93 saflik).
+
+### "Komsuya gore yayil" (FLOODFILL_FIXED_RANGE kapali)
+**Ne oldu:** bolge tohumla degil komsuyla kiyaslansin, kademeli
+degisimde yayilsin, sicramada dursun.
+**Olculen:** bolge karenin **%68-81**'ine yayiliyor - basamak engeli
+acikken bile, her toleransta.
+**Teknik neden:** masa yumusak bir rampa; cisimden odanin her yerine
+dusuk basamakli bir yol var. Yayilarak calisan kriterin capasi yok.
+
+### Watershed'e derinligi karistirma (2026-08-20)
+**Ne oldu:** watershed'in ustunde yurudugu goruntuye parlakligin
+yanina derinlik de eklendi.
+**Olculen:** kapsam %99 -> %60-82, saflik %93 -> %45-69.
+**Teknik neden:** derinlik haritasi WLS ile yumusatilmis, kenarlari
+parlaklik kadar keskin degil.
+**Sonuc:** watershed yalnizca parlaklik uzerinde calistirilir.
 
 ### Dokusuz yuzeyler
 SGBM blok esleme tabanli — tekrar eden veya tamamen duz yuzeyler (beyaz duvar, parlak metal, cam) icin disparity uretemiyor. `patterns/sgbm_doku_desenleri_v2.pdf` bu amacla basildi: cismin uzerine veya arkasina doku deseni konularak esleme kalitesi artirilabilir.

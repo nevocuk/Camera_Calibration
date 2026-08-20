@@ -721,45 +721,356 @@ ikili olarak isaretli.
 
 ---
 
+## 2026-08-20 — Segmentasyon Yontemleri, Duzlem Dogrulama, Arayuz Ipuclari
+
+Gunun konusu: "tikladigim cismi olc" akisinin **guvenilir** hale
+getirilmesi. Bes ayri yontem denendi, ucu ise yaradi, ikisi kokten
+calismadi ve nedeni olculdu. Referans cisimler: termos 250 x 72 mm,
+ayakta sise ~250 x 72 mm.
+
+### KARE OLCUSU DOGRULANDI — bekleyen madde kapandi
+Komsu ChArUco koselerinin **3B mesafesi** olculdu. Bu, config'deki
+`olculen_kare_boyutu_mm` degerini hic kullanmayan bagimsiz bir
+kontrol (dairesel degil):
+
+| | Deger |
+|---|---|
+| 20 cekimde medyan | **20.05 mm** |
+| Ortalama / salinim | 20.14 / 0.36 mm |
+| Config | 20.00 mm |
+| Oran | **1.0023 (+%0.2)** |
+
+Config dogru, kalibrasyon olcegi dogru. Kumpasla dogrulama gerekmiyor.
+
+### Kamera tepeye alindi — bir sorunu cozdu, bir sorun acti
+Kamera masaya ~80 dereceyle bakarken 26-28 dereceye alindi.
+
+**Cozdugu:** egik bakista blok esleme bozuluyordu (7 px'lik blok
+boyunca 3.99 px disparity degisimi). Mesafe 610 -> 470-590 mm indi,
+derinlik adimi 3.65 -> 2.42 mm.
+
+**Actigi:** cisim AYAKTA dururken uzun ekseni **bakis
+dogrultusuna** dondu. Olculdu (termos, tepeden, ayakta):
+
+| tol | UZUN | Gercek |
+|---|---|---|
+| 30 mm | 87 x 77 x 36 | 250 x 72 |
+| 60 mm | 140 x 70 x 32 | |
+
+Bolge cismin 250 mm'sinin ancak 76-139 mm'lik bir **derinlik
+dilimini** kapsiyor.
+
+**Kural (tek cumle):** kamera cismin en buyuk yuzlerini gormeli;
+**kameraya dogru bakan eksen olculemeyen eksendir.** Tepeden bakis
+masada YATAN cisimler icin dogru, AYAKTA duran uzun cisim icin en
+kotu acidir. Termos yatirilinca uzun eksen 78 -> 284 mm'ye cikti.
+
+### Sanal kamera dondurme: yapilabilir ama FAYDASIZ
+"3B noktalari dondurup baska acidan baksak" fikri olculdu.
+
+Dondurme bir koordinat degisimidir; gurultu de birlikte doner,
+buyuklugu degismez. Asil sinir gurultunun YONE GORE esit olmamasi:
+
+| Z | YANAL (Z/f) | DERINLIK (Z²/(f·B)) | oran |
+|---|---|---|---|
+| 400 mm | 0.28 mm | 1.57 mm | 5.6x |
+| 550 mm | 0.39 mm | 2.97 mm | **7.7x** |
+| 1000 mm | 0.71 mm | 9.82 mm | 13.9x |
+
+Oran tam olarak **Z / B**, yani tek belirleyici baz uzunlugu
+(71.79 mm). 550 mm'de orani 1'e indirmek icin baz 550 mm olmali.
+
+**Ama gurultu zaten darbogaz degil.** 46 adet 120x120 masa yamasinda
+yerel duzlemsel sacilim olculdu:
+
+| | Deger |
+|---|---|
+| Medyan sacilim | **1.15 mm** |
+| Disparity karsiligi | 0.44 px |
+| Karsilastirma: olculen epipolar hata | 0.420 px |
+
+Iki bagimsiz olcum ayni sayiyi veriyor. Gordugumuz olcum hatalari
+30-60 mm, yani sensor gurultusunun **30-50 kati**. Darbogaz
+**segmentasyon**, geometri ya da hassasiyet degil. Baz uzunlugunu
+buyutmek bu yuzden listede yok.
+
+### Duzlem dogrulama: uyari mekanizmasi ve sinirlari
+Tespit metrikleri (kose sayisi, izdusum hatasi) tahtanin NEREDE
+oldugunu soylemiyor. Uygulama artik tespit sonrasi duzlemi sahnenin
+kendi baskin duzlemiyle (RANSAC) karsilastiriyor; oteleme > 15 mm ya
+da aci > 10 derece ise kirmizi uyari veriyor.
+
+Esikler olculdu (5 cekim x 6 RANSAC kosusu): **oteleme kararli**
+(48-56 mm, salinim +-1.5 mm), **aci oynak** (2.4-11 derece, RANSAC
+bazen masa yerine laptop yuzeyini seciyor). Asil olcut oteleme.
+
+**Yanlis teshis ve duzeltmesi:** 30-53 mm'lik otelemeyi solvePnP'nin
+duz desen poz belirsizligine bagladim. **Olcum bunu curuttu.**
+Duzlem solvePnP yerine tahtanin stereo derinliginden de uydurulup
+23 cekimde karsilastirildi:
+
+| | Deger |
+|---|---|
+| Iki yontem arasi fark | **3.4 mm / 0.60 derece** (medyan) |
+| Tahtanin kendi uzerinde yukseklik | solvePnP 1.04 mm, derinlik 0.33 mm |
+
+Iki bagimsiz yontem ayni duzlemi veriyor. Kose sayisi dustugunde
+(13-17 kose) solvePnP cokuyor, derinlik yontemi dayaniyor
+(`q_20260819_144828`: solvePnP +259.97 mm, derinlik -1.90 mm).
+30+ kose varken ikisi denk.
+
+### Otelemenin gercek nedeni: TEKRARLI DESENDE STEREO ESLEME BOZULMASI
+Tahta sahnedeyken cekim alindi ve dogrudan olculdu:
+
+| | d (mm) |
+|---|---|
+| Tahta duzlemi | 526.8 |
+| Cevresindeki masa | 527.8 |
+| Aralarindaki aci | **0.22 derece** |
+| Tahtanin kalinligi | **2.1 mm** |
+
+Tahta masaya tam duz yatiyor — yerlestirme dogru. Ama tahtanin
+UZERINDEKI derinlik bozuk:
+
+| | Bu cekim | Saglikli cekim |
+|---|---|---|
+| Tahtada mesafe dagilimi | **410 – 656 mm** | ~25 mm |
+| Disparity salinimi | **37.4 px** | 8.9 px |
+| Olculen kare boyu | **21.68 mm** | 20.0 mm |
+| Disparity tepeleri | 168 / 239 / 250 / 260 px | tek tepe 159 px |
+
+Duz bir tahtanin mesafesi 250 mm'lik bir aralikta saçilamaz. ChArUco
+**tekrarli** bir desen; blok esleme bazi bloklarda yanlis kareye
+kilitleniyor. Cevredeki duz beyaz masa temiz olculuyor (kalinti
+1.64 mm) — sorun yuzeyde degil desenin periyodikliginde.
+
+**Eklenen koruma:** sahne karsilastirmasindan once tahtadaki
+disparity salinimina bakiliyor; 20 px'i asarsa karsilastirma
+yapilmiyor ve "TAHTADA DERINLIK BOZUK" uyarisi veriliyor.
+**Pratik cozum:** tahtayi biraz uzaklastir (~650 mm); arsivdeki
+saglikli tespitlerin hepsi 590-653 mm arasindaydi.
+
+### Zemin esigi artik NEGATIF olabilir
+Alt sinir 3 mm'den **-60 mm**'ye acildi. Gerekce: tespit edilen
+duzlem masa degil tahtanin UST yuzeyidir; tahtayi kaldirip cismi
+koyunca cismin tabani duzlemin altinda kalir.
+
+**Ama tek basina yetmiyor** (olculdu). Gercek masa pikselleri
+uzerinde `kayitli duzlem - gercek duzlem`:
+
+| | Deger | Esikle duzelir mi |
+|---|---|---|
+| Ortalama | -44.2 mm | **Evet** (sabit oteleme) |
+| Salinim | 20.4 mm | **Hayir** (egimden) |
+| %5-%95 yayilimi | 69 mm | **Hayir** |
+
+Aci farki 7.8 derece, masanin gorunen genisligi 484 mm ve
+`484 x tan(7.8) = 66 mm` — yayilimi tam olarak egim aciklıyor.
+Egik bir duzlem kaydirmakla duzelmez.
+
+---
+
+## SEGMENTASYON YONTEMLERI — bes deneme
+
+Hepsi ayni soruya cevap ariyor: "tiklanan piksel hangi cisme ait?"
+
+### 1. Derinlik toleransi (mevcut varsayilan)
+`floodFill` + `FLOODFILL_FIXED_RANGE`: her piksel **tohumla**
+kiyaslanir, farki `tol`u asan alinmaz. Tolerans mesafeye gore
+olceklenir (`dd = f*B*dZ/Z²`).
+
+**Calistigi durum:** cisim goruntu duzlemine paralel uzaniyorsa.
+**Coktugu durum:** cisim bakis dogrultusunda uzaniyorsa. Olculdu
+(ayakta sise, tepeden): tol 15/30/60 -> **65 / 83 / 158 mm**
+(gercek ~250).
+
+### 2. Parlaklik SEVIYESI (`gri tol`) — kismen
+Tohumun gri degerinden sapan pikseller elenir.
+Olculdu (koyu termos / beyaz masa): kisit yok 340x272, 45 -> 262x78,
+25 -> 258x70.
+**Sinir:** cisme bagimli. Cismin kendi kapagi/etiketi farkli
+renkteyse onu da atar; acik renkli cisimde hic calismaz.
+
+### 3. Kenar + basamak engelleri (`kenar`, `basamak`) — kismen
+`kenar` = parlaklik basamagi |grad I|, `basamak` = derinlik basamagi
+|grad Z| (mm/px). Esigi asan pikseller duvar yapilir.
+
+Esik dayanagi olculdu: duz yuzey 0.2-2 mm/px, cisim siniri 10+ mm/px.
+
+**Kazanci — kararlilik.** ORTA eksenin tol 15/30/60 yayilimi,
+6 cekim:
+
+| Ayar | Yayilimlar |
+|---|---|
+| gri35 + kenar60 | 15 / 24 / 3 / 31 / 65 / 16 mm |
+| gri35 + kenar30 + **basamak3** | **3 / 0 / 3 / 12 / 31** / 24 mm |
+
+**Sinir 1:** cisim destek yuzeyine DEGDIGI yerde basamak yoktur
+(yatik silindir masaya tegettir). Tek basina 392.9 mm veriyor ve
+esigi 3'ten 12'ye cikarmak hicbir sey degistirmiyor.
+
+**Sinir 2 — asil olan:** bir engel bolgeyi **buyutemez, ancak
+kucultebilir.** Bolge zaten cismin ortasinda duruyorsa engel hic
+devreye girmez. Olculdu (ayakta sise, tol 30):
+
+| | Deger |
+|---|---|
+| Bolge | 34.010 px = gercek cismin **%25**'i |
+| Bolgenin Z araligi | 444-504 mm |
+| **Durdugu yerdeki basamak** | **3.91 mm/px** (yani kenar YOK) |
+| Cismin gercek siluetindeki basamak | 48.57 mm/px |
+
+Bu yuzden `kenar`/`basamak` ayakta duran cisme tepeden bakarken
+sonucu **hic degistirmiyor**.
+
+### 4. Yukseklik kriteri (`yukseklik`) — CALISIYOR
+Yayilma yok. Her piksel sabit bir referansa karsi olculur:
+**duzlemden >= h mm yukarida VE tiklamaya duzlem uzerinde <= r mm
+yanal uzaklikta.** Tolerans hic kullanilmaz.
+
+Olculdu (ayakta sise, gercek ~250 mm):
+
+| Ayar | Sonuc |
+|---|---|
+| Derinlik toleransi 15/30/60 | 65 / 83 / 158 mm |
+| h=15 yanal=45 | **248.4 mm** |
+| h=15 yanal=70 | 247.4 mm |
+| h=25 yanal=45 | 247.7 mm |
+| h=25 yanal=70 | 247.0 mm |
+
+**Sinir:** gecerli bir zemin duzlemi gerektirir.
+
+### 5. Watershed (`watershed`) — CALISIYOR, duzlem gerektirmez
+Once ayrimin gercekten iyi oldugu dogrulandi:
+
+| | \|grad I\| medyan | \|grad Z\| medyan |
+|---|---|---|
+| Siluet | 108.3 | 22.28 |
+| Cismin ici | 5.7 | 0.22 |
+
+19-100 kat ayrim var, yani **esik sorunu yok**. O halde bu duvarlari
+`floodFill`'e verip toleransi serbest biraksak?
+
+**Denendi, tutmadi:**
+
+| Ayar | Kapsam | Saflik |
+|---|---|---|
+| kenar 30 basamak 3 | %43 | %9 |
+| kenar 20 basamak 2 | %39 | %87 |
+| kenar 80 basamak 10 | %98 | %17 |
+
+Bosluk kapatma (3/5/7/9 px) da duzeltmiyor. Sebep **topolojik**:
+floodFill'in tutmasi icin duvarin HER YERDE kapali olmasi gerekiyor;
+olculdu, siluetin en fazla **%86**'si duvar oluyor ve kalan %14'un
+tek bir pikselinden bolge kaciyor.
+
+**Watershed bu sarti gerektirmiyor** — her piksel gradyan
+sirtlarini asmadan ulastigi en yakin isaretciye atanir; tek delik
+her seyi bozmaz. Isaretciler: tiklanan nokta cevresi = cisim,
+uzak halka = arka plan.
+
+| Ayar | Sonuc | Kapsam | Saflik |
+|---|---|---|---|
+| ic_r 25, dis_r 400 | **248.9 x 75.9** | %99 | %93 |
+| ic_r 25, dis_r 550 | 249.0 x 76.1 | %98 | %93 |
+| ic_r 60, dis_r 400 | 248.9 x 75.9 | %99 | %93 |
+| ic_r 60, dis_r 550 | 249.0 x 76.0 | %98 | %93 |
+
+Ayara duyarsiz, yukseklik kriteriyle ayni dogrulukta ve **zemin
+duzlemi gerektirmiyor**.
+
+**Onemli:** watershed yalnizca PARLAKLIK uzerinde calistirilmali.
+Derinligi karistirmak olculdu ve bozuyor (kapsam %99 -> %60-82,
+saflik %93 -> %45-69) — WLS ile yumusatilmis derinlik haritasinin
+kenarlari parlaklik kadar keskin degil.
+
+### Ozet — hangi durumda hangisi
+
+| Durum | Yontem |
+|---|---|
+| Cisim goruntu duzlemine paralel yatiyor | derinlik toleransi + `gri`/`kenar`/`basamak` |
+| Cisim ayakta, kamera tepeden | **`watershed`** (duzlem gerekmez) ya da `yukseklik` |
+| Duzlem guvenilir ve taban olcusu de lazim | `yukseklik` + taban geri kazanimi |
+
+---
+
+### Arayuz: ipucu balonlari
+19 kontrole hover aciklamasi, 6 adet `?` isareti eklendi. Metinler
+olculen sayilari tasiyor (CLAHE sicrama 0.361->0.419, gri tol
+340x272 -> 258x70, watershed 65/83/158 -> 248.9) — kullanici degerin
+neden oyle secildigini goruyor.
+
+`Ipucu` sinifi: Toplevel + overrideredirect, 450 ms gecikme, ekran
+kenarindan tasmama. Test edildi (balon olusuyor, metni dogru,
+konumlaniyor, fare cikinca yok oluyor); `winfo_ismapped()` yerine
+pencere nesnesi ve icerik dogrulandi.
+
+### Yeni/degisen dosyalar
+| Dosya | Ne |
+|---|---|
+| `src/kutu_gorsel.py` | `--kenar --basamak --yukseklik --watershed --zemin` |
+| `src/camera_test.py` | Ipucu altyapisi, duzlem dogrulama, negatif esik, 4 yeni segmentasyon kutusu |
+
+---
+
 ## Yapilacaklar / Sonraki Adimlar
 
-### Tamamlandi (2026-08-17 / 18 / 19)
+### Tamamlandi (2026-08-17 / 18 / 19 / 20)
 - [x] Kamera dengesizligi cozuldu (parlaklik 1.02x, kontrast 1.09x)
-- [x] Odak esitlendi (SOL 124.5 / SAG 119.1 = 1.05x)
-- [x] Eski kalibrasyon kareleri arsivlendi (odak degistigi icin gecersizdi)
-- [x] Yeni kalibrasyon yapildi (2026-08-18) — epipolar hata 0.420 px
+- [x] Odak esitlendi, eski kalibrasyon kareleri arsivlendi
+- [x] Yeni kalibrasyon (2026-08-18) - epipolar hata 0.420 px
 - [x] Zemin duzlemi rektifiye cercevede, uygulama icinden tespit
 - [x] Tiklayarak olcum + kutu gorseli + taban geri kazanimi
+- [x] **Kare olcusu dogrulandi** - 20 cekimde 20.05 mm (config 20.00)
+- [x] **Segmentasyon: bes yontem denendi**, watershed ve yukseklik
+      kriteri calisiyor (ayakta sise 248.9 mm, gercek ~250)
+- [x] Duzlem sahneye karsi dogrulama + bozuk-derinlik korumasi
+- [x] Arayuz ipucu balonlari (19 kontrol)
 
-### HEMEN
-- [ ] **Lens vidalarini sabitle** (oje/kilit vidasi) — odak oynamamali
-- [ ] **Desen olcusunu kumpasla dogrula**: 5 kare olc, 5'e bol.
-      `charuco_config.json` 20.0 mm diyor; rapor olcumlerinden ONCE teyit et.
-      Yanlissa tum mutlak olcumler ayni oranda kayar.
+### HEMEN — rapor olcumlerinden once
+- [ ] **Lens vidalarini sabitle** (oje/kilit vidasi) - odak oynamamali
+- [ ] **Zemin duzlemini duzelt**: tahtayi ~650 mm'ye uzaklastir ve
+      yeniden tarat. 585 mm'de tekrarli desen blok eslemeyi bozuyor
+      (disparity salinimi 37.4 px). Uyari cikmazsa duzlem guvenilir.
+- [ ] **Olcum yontemini sabitle**: rapor olcumlerinin tamami ayni
+      yontemle alinmali. Onerilen `watershed` (duzlem gerektirmiyor,
+      ayara duyarsiz, %99 kapsam / %93 saflik).
 - [ ] Olcum defterindeki iki GECERSIZ satiri rapora alma
-      (metre/mm hatasi ve 80 derece duzlem)
 
-### Oncelikli — rapor verisi
-1. [ ] Mesafeye gore hata egrisi (5.2) — en az 4 mesafede olcum
-2. [ ] Tekrarlanabilirlik testi (5.3) — 10 olcum, std sapma.
-       Not: olcumun kendi oturma sacilimi ~%4.3 olculdu, bunun altina inmez.
-3. [ ] Calisma zarfi (5.4) — min/maks mesafe
-4. [ ] Kalibrasyon kalitesinin etkisi (5.5)
-5. [ ] Yontem karsilastirmasi (5.6) — ham harita vs `--zemin`
-       (tablo hazir: zemin cikarma ayara duyarsizlik kazandiriyor)
-6. [ ] Ana sonuc tablosu (5.9) — 5 cisim x 3 boyut.
-       Her satir icin kutu gorseli uret, gorselle dogrula.
+### Oncelikli — rapor verisi (henuz HIC toplanmadi)
+1. [ ] **Mesafeye gore hata egrisi (5.2)** - en az 4 mesafede olcum.
+       Calisma araligi 400-900 mm; her mesafede ayni cisim.
+2. [ ] **Tekrarlanabilirlik (5.3)** - ayni mesafede 10 olcum, std sapma.
+       Not: olcumun kendi oturma sacilimi ~%4.3 olculdu, altina inmez.
+3. [ ] **Calisma zarfi (5.4)** - min/maks mesafe.
+       numDisparities=256 ile en yakin 397 mm (olculdu).
+4. [ ] **Kalibrasyon kalitesinin etkisi (5.5)**
+5. [ ] **Yontem karsilastirmasi (5.6)** - tablo BUYUK OLCUDE HAZIR:
+       derinlik toleransi / yukseklik kriteri / watershed
+       (65-158 vs 247-248 vs 248.9 mm), ham vs zemin haritasi
+6. [ ] **Ana sonuc tablosu (5.9)** - 5 cisim x 3 boyut.
+       Her satir icin kutu gorseli uret ve GORSELLE dogrula
+       (sayisal yakinlik dogrulama degildir - bir kez masa kenari
+       termos diye raporlandi).
 
 ### Orta Vadeli
-7. [ ] GPU destegini WLS ile birlikte geri ekle (performans)
-8. [ ] Pozlama/aydinlatma duyarliligi testi (5.7)
-9. [ ] Mekanik kararlilik testi (5.8) — 0/2/24 saat epipolar hata
+7. [ ] Pozlama/aydinlatma duyarliligi testi (5.7)
+8. [ ] Mekanik kararlilik testi (5.8) - 0/2/24 saat epipolar hata
+9. [ ] GPU destegini WLS ile birlikte geri ekle (performans)
 
 ### Son Asamalar
-9. [ ] Kesim yonergesiyle fiziksel kutu dogrulama (5.10)
-10. [ ] Rapor yazimi (Ek-4 sablonu)
-11. [ ] Demo hazirligi (canli gosterim)
-12. [ ] Mevcut degisiklikleri commit'le
+10. [ ] Kesim yonergesiyle fiziksel kutu dogrulama (5.10)
+11. [ ] Rapor yazimi (Ek-4 sablonu)
+12. [ ] Demo hazirligi (canli gosterim)
+
+### Bilinen acik konular
+- Zemin duzlemi sahneden 30-57 mm ve 7.8 derece sapiyor. Kaynak
+  ChArUco'nun periyodik deseninde stereo esleme bozulmasi; tahtayi
+  uzaklastirmak cozmeli, dogrulanmadi.
+- Watershed ve yukseklik kriteri YALNIZCA bir cekimde (ayakta sise)
+  karsilastirildi. Rapor oncesi en az 3 cisimde tekrarlanmali.
+- Yuvarlak cisimlerde en kisa eksen hala gorunen yay kalinligi
+  (tek bakis acisindan kacinilmaz).
 
 ---
 
