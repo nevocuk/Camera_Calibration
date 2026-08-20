@@ -1524,6 +1524,10 @@ class CameraApp:
         lbl_es.pack(side=tk.LEFT, padx=(10, 2))
         ipucu(lbl_es, IP_ESIK)
         self.ground_th_var = tk.IntVar(value=12)
+        # Duzlemi solvePnP yerine tahtanin stereo derinliginden uydur.
+        # VARSAYILAN KAPALI - mevcut davranis degismesin. Acik/kapali
+        # farki her tespitte durum satirinda yan yana gosterilir.
+        self.ground_derinlik_var = tk.BooleanVar(value=False)
         sp_es = tk.Spinbox(zem_row, from_=-60, to=100, width=4,
                            textvariable=self.ground_th_var, bg=INPUT_BG,
                            fg=YELLOW, font=("Consolas", 9), relief="flat",
@@ -1546,6 +1550,31 @@ class CameraApp:
               "yoktur; WLS oralari cevreden TAHMIN ederek doldurur ve "
               "tahmin duzleme yakin duserse piksel yanlislikla zemin "
               "sayilip silinir - cisim delik delik cikar.")
+        cb_gd = tk.Checkbutton(zem_row, text="derinlikten uydur",
+                               variable=self.ground_derinlik_var,
+                               bg=CARD, fg=FG, selectcolor=BG,
+                               activebackground=CARD, activeforeground=FG,
+                               font=("Segoe UI", 8))
+        cb_gd.pack(side=tk.LEFT, padx=(8, 0))
+        ipucu(cb_gd,
+              "Duzlemi solvePnP yerine TAHTANIN STEREO DERINLIGINDEN "
+              "uydur.\n\n"
+              "SORUN: duz bir desende solvePnP'nin iki matematiksel "
+              "cozumu vardir ve secim zayif kalabiliyor. Olculdu: secim "
+              "gerekcesi 'derinlik uyumu %12 vs %6' iken duzlem gercek "
+              "masaya gore 7.8 derece EGIK ve 30-53 mm havada cikti. "
+              "Egim esikle telafi edilemez.\n\n"
+              "BU YONTEMDE:\n"
+              "  iki-kokluluk yok, tek cozum\n"
+              "  kare olcusune bagimli degil\n"
+              "  zaten derinlikle ayni cercevede\n"
+              "  96 kose yerine on binlerce noktaya uyuyor\n\n"
+              "SARTI: tahtanin uzerinde saglam disparity olmali. "
+              "ChArUco siyah-beyaz kareli oldugu icin SGBM'nin en iyi "
+              "calistigi durumdur.\n\n"
+              "Kapali olsa bile her tespitte iki yontem yan yana "
+              "olculup durum satirinda gosterilir - once oraya bakip "
+              "hangisinin sahneye daha iyi oturdugunu gor.")
         btn_zt = tk.Button(zem_row, text="Zemin tespit et",
                            command=self._detect_ground_plane,
                            bg="#1a5276", fg="white",
@@ -3599,6 +3628,44 @@ class CameraApp:
                     gerekce = "izdusum hatasi (derinlik verisi yok)"
 
             normal, d, rms = adaylar[secim]
+            pnp_normal, pnp_d = normal.copy(), float(d)
+
+            # --- IKINCI YONTEM: tahtanin stereo derinliginden uydur ---
+            # Her zaman hesaplanir (kutucuk kapali olsa da) ki kullanici
+            # iki yontemi yan yana gorsun. Kullanilmasi kutucuga bagli.
+            der_normal = der_d = None
+            der_not = "derinlik verisi yok"
+            dsp_ref2 = getattr(self, "_pre_ground_dsp", None)
+            if dsp_ref2 is None:
+                with self._depth_lock:
+                    dsp_ref2 = self._depth_olcum
+            if dsp_ref2 is not None and dsp_ref2.shape[:2] == gray.shape[:2]:
+                dn, dd2, ic_oran, der_not = self._tahtadan_derinlik_duzlemi(
+                    img_pts, dsp_ref2, self.calib_data["Q"])
+                if dn is not None:
+                    der_normal, der_d = dn, dd2
+
+            kaynak = "solvePnP"
+            if self.ground_derinlik_var.get():
+                if der_normal is None:
+                    self.lbl_ground.config(
+                        text=f"Derinlikten uydurulamadi ({der_not}). "
+                             "Kutucugu kapat ya da tahtanin uzerinde "
+                             "derinlik olustugundan emin ol.", fg=RED)
+                    return
+                normal, d = der_normal, der_d
+                kaynak = "derinlik"
+                rms = 0.0          # bu yontemde izdusum hatasi tanimsiz
+
+            # Iki yontem arasindaki fark - rapor icin degerli
+            karsilastirma = ""
+            if der_normal is not None:
+                fark_aci = float(np.degrees(np.arccos(np.clip(
+                    abs(float(pnp_normal @ der_normal)), -1.0, 1.0))))
+                fark_mm = abs(abs(pnp_d) - abs(der_d)) * 1000.0
+                karsilastirma = (f" | solvePnP vs derinlik: {fark_mm:.0f} mm, "
+                                 f"{fark_aci:.1f} derece ({der_not})")
+
             aci = float(np.degrees(np.arccos(min(abs(normal[2]), 1.0))))
             mesafe = abs(d) * 1000.0
             # ACI BIR HATA OLCUTU DEGIL. Kamera masaya egik baktiginda
@@ -3606,7 +3673,7 @@ class CameraApp:
             # 40-50 derece cikar; tahta yine de masaya tam duz yatiyordur.
             # Gecerliligin gercek olcutu, cozulen pozun kose noktalarini
             # ne kadar iyi acikladigidir: yeniden izdusum hatasi.
-            if rms > 2.0:
+            if kaynak == "solvePnP" and rms > 2.0:
                 self.lbl_ground.config(
                     text=f"Duzlem uyumsuz (izdusum hatasi {rms:.2f} px). "
                          "Tahta bukuk/kalkik olabilir, isigi artir.", fg=RED)
@@ -3659,6 +3726,7 @@ class CameraApp:
                      K=K, D=D,
                      frame="rectified",          # KRITIK: cerceve etiketi
                      n_corners=n_kose, rms_px=rms, aci_derece=aci,
+                     yontem=kaynak,
                      tarih=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
             self.ground_data = None              # yeniden okunmaya zorla
             self._load_ground_data()
@@ -3669,12 +3737,91 @@ class CameraApp:
             # "bozulmus" gorur. Olcum yapilacagi zaman elle acilir.
             uyari = "  (cok siyirtma acisi, hassasiyet dusuk)" if aci > 70 else ""
             self.lbl_ground.config(
-                text=f"Zemin kaydedildi: {n_kose} kose, izdusum {rms:.2f} px, "
-                     f"bakis acisi {aci:.1f} derece, duzlem {mesafe:.0f} mm, {gerekce}. "
-                     f"Olcum icin kutucugu isaretle.{uyari}{sapma_metni}",
+                text=f"Zemin kaydedildi [{kaynak}]: {n_kose} kose, "
+                     + (f"izdusum {rms:.2f} px, " if kaynak == "solvePnP"
+                        else "")
+                     + f"bakis acisi {aci:.1f} derece, "
+                     + f"duzlem {mesafe:.0f} mm, {gerekce}.{karsilastirma} "
+                     + f"Olcum icin kutucugu isaretle.{uyari}{sapma_metni}",
                 fg=sapma_renk or (YELLOW if aci > 70 else GREEN))
         except Exception as ex:
             self.lbl_ground.config(text=f"Zemin tespiti hatasi: {ex}", fg=RED)
+
+    @staticmethod
+    def _tahtadan_derinlik_duzlemi(img_pts, dsp, Q, ic_pay=0.12,
+                                   tur=400, esik=3.0):
+        """Duzlemi solvePnP yerine TAHTANIN STEREO DERINLIGINDEN uydur.
+
+        NEDEN: solvePnP duz bir hedefte iki cozum uretir (planar pose
+        ambiguity) ve secim zayif kalabiliyor. Olculdu 2026-08-20:
+        secim gerekcesi "derinlik uyumu %12 vs %6" - kazanan da zayif;
+        sonucta duzlem gercek masaya gore 7.8 derece EGIK ve 30-53 mm
+        havada cikti. Egim esikle telafi edilemez (olculdu: gercek masa
+        pikselleri uzerinde ortalama -44.2 mm ama salinim 20.4 mm).
+
+        BU YONTEMDE:
+          - iki-kokluluk YOK, tek bir en kucuk kareler cozumu var
+          - kare olcusune (olculen_kare_boyutu_mm) BAGIMLI DEGIL
+          - zaten derinlikle ayni cercevede, R1 donusumu gerekmiyor
+          - 96 kose yerine on binlerce noktaya uyduruyor
+
+        SARTI: tahtanin uzerinde saglam disparity olmali. ChArUco
+        siyah-beyaz kareli oldugu icin SGBM icin en iyi durum - orada
+        eslesme guclu.
+
+        ic_pay: tahtanin kenarindan iceri kirpma orani. Kenarda
+        disparity kenar etkisiyle bozulur, iceriyi kullaniyoruz.
+        """
+        iy = np.asarray(img_pts, dtype=np.float32).reshape(-1, 2)
+        if len(iy) < 8:
+            return None, None, 0.0, "kose azligi"
+        kabuk = cv2.convexHull(iy).reshape(-1, 2)
+        merkez = kabuk.mean(axis=0)
+        kabuk_ic = (merkez + (kabuk - merkez) * (1.0 - ic_pay))
+        maske = np.zeros(dsp.shape[:2], np.uint8)
+        cv2.fillConvexPoly(maske, kabuk_ic.astype(np.int32), 1)
+        gec = (maske > 0) & (dsp > 0)
+        if gec.sum() < 2000:
+            return None, None, 0.0, f"tahtada disparity yok ({int(gec.sum())} px)"
+        P3 = cv2.reprojectImageTo3D(dsp.astype(np.float32), Q)
+        gec &= np.isfinite(P3).all(axis=2)
+        Q3 = P3[gec] * 1000.0                      # mm
+        if len(Q3) < 2000:
+            return None, None, 0.0, "gecerli nokta az"
+        rng = np.random.default_rng(0)
+        S = Q3 if len(Q3) <= 40000 else Q3[
+            rng.choice(len(Q3), 40000, replace=False)]
+        en, en_n, en_d = 0, None, None
+        for _ in range(tur):
+            a, b, cc = S[rng.choice(len(S), 3, replace=False)]
+            nn = np.cross(b - a, cc - a)
+            L = float(np.linalg.norm(nn))
+            if L < 1e-9:
+                continue
+            nn = nn / L
+            dd = float(-nn @ a)
+            say = int((np.abs(S @ nn + dd) < esik).sum())
+            if say > en:
+                en, en_n, en_d = say, nn, dd
+        if en_n is None:
+            return None, None, 0.0, "RANSAC cozum bulamadi"
+        # Ic noktalarla en kucuk kareler ince ayar (RANSAC 3 noktaya
+        # dayanir, sonucu tum ic noktalara oturtmak gurultuyu azaltir).
+        ic = np.abs(S @ en_n + en_d) < esik
+        if ic.sum() > 100:
+            X = S[ic]
+            mu = X.mean(axis=0)
+            _, _, V = np.linalg.svd(X - mu, full_matrices=False)
+            en_n = V[2] / np.linalg.norm(V[2])
+            en_d = float(-en_n @ mu)
+        if en_n[2] > 0:                            # kamera onunde: nz < 0
+            en_n, en_d = -en_n, -en_d
+        kalinti = float(np.median(np.abs(S[ic] @ en_n + en_d))) if ic.sum() > 100 \
+            else float("nan")
+        return (en_n.astype(np.float64), en_d / 1000.0,   # d METRE (uyumluluk)
+                float(ic.sum()) / len(S),
+                f"{int(gec.sum())} px, ic %{ic.mean()*100:.0f}, "
+                f"kalinti {kalinti:.2f} mm")
 
     @staticmethod
     def _sahne_duzlemi(pts, gec, tur=600, esik=6.0, ornek=60000):
