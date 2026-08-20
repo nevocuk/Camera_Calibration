@@ -1,7 +1,13 @@
 """Staj raporu icin VERI uret - elle kopyalanmis degil, yeniden olculmus.
 
 Girdi : data/rapor_olcumleri.csv  (hangi cekimde nereye tiklandi,
-        cismin GERCEK olculeri ne)
+        cismin GERCEK olculeri ne, dahil=E/H ve dislama nedeni)
+
+ELEME KURALI: bir olcum SONUCU YANLIS diye elenmez - o secmecedir
+ve bu projede bir kez masa kenarini termos diye raporlatti. Yalnizca
+GIRDI kalitesi gerekce olabilir: yanlis yere tiklanmis, cisim yarim
+(kenarda / kirpilmis), cisim baska cisimlerle ic ice. Elenen satirlar
+GIZLENMEZ; rapor tablosunda gerekcesiyle ayri bir bolumde listelenir.
 Islem : her satir icin kayitli .npz'den olcum TEKRAR yapilir
 Cikti :
    output/reports/rapor_olcumler.csv    her olcum + hata yuzdesi
@@ -153,8 +159,16 @@ def main():
     with open(GIRDI, encoding="utf-8") as fh:
         satirlar = list(csv.DictReader(fh))
 
-    olcumler, duyarlilik = [], []
+    olcumler, duyarlilik, elenen = [], [], []
     for r in satirlar:
+        # dahil sutunu yoksa varsayilan E (geriye uyumluluk)
+        if str(r.get("dahil", "E")).strip().upper() in ("H", "HAYIR", "0"):
+            elenen.append({
+                "cekim": r["cekim"],
+                "nokta": f"{r['nokta_x']},{r['nokta_y']}",
+                "cisim": r.get("cisim", ""),
+                "neden": r.get("dislama_nedeni", "belirtilmemis")})
+            continue
         yol = os.path.join(CAP_DIR, r["cekim"])
         if not os.path.exists(yol):
             print(f"  ATLANDI (dosya yok): {r['cekim']}")
@@ -233,6 +247,7 @@ def main():
                 print(f"   URETILEMEDI: {r['cekim']}")
 
     p1 = csv_yaz("rapor_olcumler.csv", olcumler)
+    csv_yaz("rapor_elenenler.csv", elenen)
     p2 = csv_yaz("rapor_duyarlilik.csv", duyarlilik)
 
     # --- sistem parametreleri
@@ -314,6 +329,16 @@ def main():
                md_tablo(["Cekim", "Gorsel dosyasi"],
                         [(x[2:15], y) for x, y in gorseller])]
 
+    if elenen:
+        md += ["\n## Degerlendirmeye ALINMAYAN olcumler\n",
+               "Bir olcum sonucu yanlis diye elenmez - o secmecedir. "
+               "Asagidakiler GIRDI kalitesi nedeniyle disarida: yanlis "
+               "yere tiklanmis, cisim yarim ya da baska cisimlerle ic "
+               "ice. Seffaflik icin listeleniyor.\n",
+               md_tablo(["Cekim", "Nokta", "Cisim", "Neden"],
+                        [(e["cekim"][2:15], e["nokta"], e["cisim"],
+                          e["neden"]) for e in elenen])]
+
     md += ["\n## Eksik veri - rapor icin toplanmali\n",
            "| Bolum | Durum | Gereken |",
            "|---|---|---|",
@@ -344,7 +369,12 @@ def main():
     with open(p4, "w", encoding="utf-8") as fh:
         fh.write("\n".join(md))
 
-    print(f"{len(olcumler)} olcum islendi.\n")
+    print(f"{len(olcumler)} olcum islendi, {len(elenen)} elendi.\n")
+    if elenen:
+        print("Degerlendirmeye ALINMAYANLAR (gerekceleriyle raporda):")
+        for e in elenen:
+            print(f"   {e['cekim'][2:15]:14} {e['nokta']:12} {e['neden']}")
+        print()
     print("Uretilen dosyalar:")
     for p in (p1, p2, p3, p4):
         if p:
