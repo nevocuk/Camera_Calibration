@@ -1535,6 +1535,11 @@ class CameraApp:
         sp_es.pack(side=tk.LEFT)
         ipucu(sp_es, IP_ESIK)
         soru(zem_row, IP_ESIK).pack(side=tk.LEFT, padx=(2, 0))
+        # Bu satir da tek basina tasiyordu (678 / 671 px olculdu);
+        # kutucuklar ve buton ikinci satira aliniyor.
+        zem_row2 = tk.Frame(c, bg=CARD)
+        zem_row2.pack(fill=tk.X, pady=(0, 2))
+        zem_row = zem_row2
         self.ground_clean_var = tk.BooleanVar(value=True)
         cb_mt = tk.Checkbutton(zem_row, text="maske temizle",
                                variable=self.ground_clean_var,
@@ -1738,8 +1743,20 @@ class CameraApp:
                   cursor="hand2").pack(side=tk.LEFT, padx=(6, 0))
         # Butonlar tek satira sigmiyordu (sagdaki ikisi ekran disinda
         # kaliyordu). Ikinci satira tasiniyor.
-        btn_row2 = tk.Frame(c, bg=CARD)
-        btn_row2.pack(fill=tk.X, pady=(0, 6))
+        # ARAYUZ NOTU: bu bolumde 11 kontrol var ve tek satira
+        # sigmiyordu - sagdaki kutular ve iki buton ekran disinda
+        # kaliyordu. Dort mantiksal gruba bolundu; her grubun basinda
+        # ne ise yaradigini soyleyen kucuk bir baslik var.
+        def _grup(baslik_metni):
+            tk.Label(c, text=baslik_metni, bg=CARD, fg=ACCENT,
+                     font=("Segoe UI", 8, "bold"), anchor="w"
+                     ).pack(fill=tk.X, pady=(6, 0))
+            f = tk.Frame(c, bg=CARD)
+            f.pack(fill=tk.X, pady=(0, 2))
+            return f
+
+        sat_bolge = _grup("Bolge secimi - derinlik toleransi")
+        btn_row2 = sat_bolge          # ilk grup bu cercevede
         IP_TOL = ("DERINLIK toleransi (mm) - disparity degil.\n\n"
                   "Tikladigin noktadan baslayan bolge, derinligi tohumdan "
                   "en fazla bu kadar farkli olan pikselleri alir. Mesafeye "
@@ -1793,7 +1810,7 @@ class CameraApp:
                     "200 mm sinirla 314 mm.\n\n"
                     "Olcecegin cismin en uzun kenarindan biraz buyuk sec; "
                     "cok kucuk secersen cismin ucunu keser.")
-        lbl_sn = tk.Label(btn_row2, text="sinir mm:", bg=CARD, fg=MUTED,
+        lbl_sn = tk.Label(btn_row2, text="sinir:", bg=CARD, fg=MUTED,
                           font=("Segoe UI", 8))
         lbl_sn.pack(side=tk.LEFT, padx=(6, 2))
         ipucu(lbl_sn, IP_SINIR)
@@ -1804,6 +1821,7 @@ class CameraApp:
         sp_sn.pack(side=tk.LEFT)
         ipucu(sp_sn, IP_SINIR)
         soru(btn_row2, IP_SINIR).pack(side=tk.LEFT, padx=(2, 0))
+        btn_row2 = _grup("Engeller - bolgenin cismin sinirini asmasini onler (istege bagli)")
         IP_KENAR = ("PARLAKLIK BASAMAGI engeli (|grad I|). 0 = kapali.\n\n"
                     "'gri tol' bir SEVIYE esigidir: tohumdan cok farkli "
                     "parlaklikta olan HER pikseli atar, yani cismin kendi "
@@ -1840,7 +1858,7 @@ class CameraApp:
                   "SINIR: cisim yuzeye DEGDIGI yerde basamak yoktur "
                   "(yatik silindir masaya tegettir). Tek basina yetmez, "
                   "gri veya kenar ile BIRLIKTE kullan.")
-        lbl_bs = tk.Label(btn_row2, text="basamak:", bg=CARD, fg=MUTED,
+        lbl_bs = tk.Label(btn_row2, text="bas.:", bg=CARD, fg=MUTED,
                           font=("Segoe UI", 8))
         lbl_bs.pack(side=tk.LEFT, padx=(6, 2))
         ipucu(lbl_bs, IP_BAS)
@@ -1851,6 +1869,7 @@ class CameraApp:
         sp_bs.pack(side=tk.LEFT)
         ipucu(sp_bs, IP_BAS)
         soru(btn_row2, IP_BAS).pack(side=tk.LEFT, padx=(2, 0))
+        btn_row2 = _grup("Alternatif kriter - biri secilirse YUKARIDAKILER KULLANILMAZ")
         IP_YUK = ("YUKSEKLIK KRITERI (mm). 0 = kapali.\n\n"
                   "Bolgeyi derinlik toleransiyla degil, 'zemin "
                   "duzleminden en az bu kadar yukarida' olcutuyle secer. "
@@ -1867,7 +1886,7 @@ class CameraApp:
                   "uzerinde), onerilen 45-70. Yukseklik serbest kalir.\n\n"
                   "SARTI: gecerli bir zemin duzlemi ve cismin duzlemin "
                   "uzerinde durmasi. Onerilen deger: 15-25")
-        lbl_yk = tk.Label(btn_row2, text="yukseklik:", bg=CARD, fg=MUTED,
+        lbl_yk = tk.Label(btn_row2, text="yuks.:", bg=CARD, fg=MUTED,
                           font=("Segoe UI", 8))
         lbl_yk.pack(side=tk.LEFT, padx=(6, 2))
         ipucu(lbl_yk, IP_YUK)
@@ -1896,7 +1915,7 @@ class CameraApp:
                  "YUKSEKLIK kriterinden farki: zemin duzlemi GEREKMEZ.\n"
                  "Bu modda tol/gri/kenar/basamak kullanilmaz; yalnizca "
                  "'sinir mm' 3B uzaklik siniri olarak calisir.")
-        lbl_ws = tk.Label(btn_row2, text="watershed:", bg=CARD, fg=MUTED,
+        lbl_ws = tk.Label(btn_row2, text="w.shed:", bg=CARD, fg=MUTED,
                           font=("Segoe UI", 8))
         lbl_ws.pack(side=tk.LEFT, padx=(6, 2))
         ipucu(lbl_ws, IP_WS)
@@ -1907,6 +1926,7 @@ class CameraApp:
         sp_ws.pack(side=tk.LEFT)
         ipucu(sp_ws, IP_WS)
         soru(btn_row2, IP_WS).pack(side=tk.LEFT, padx=(2, 0))
+        btn_row2 = _grup("Secenekler ve cikti")
         cb_dz = tk.Checkbutton(btn_row2, text="masayi at",
                                variable=self.pca_duzlem_var,
                                bg=CARD, fg=FG, selectcolor=BG,
