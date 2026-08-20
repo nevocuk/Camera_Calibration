@@ -59,6 +59,8 @@ Kamera Yakalama  →  Stereo Rektifikasyon  →  SGBM + WLS  →  reprojectImage
 | `src/box_output.py` | Kutu onerisi + RSC kesim yonergesi PDF uretimi. |
 | `src/ground_plane.py` | ChArUco ile zemin duzlemi (normal + d) tespiti. |
 | `src/depth_view.py` | Bagimsiz derinlik goruntuleyici (3 pencere, Z=f*B/d formulu). |
+| `src/rapor_verisi.py` | **Rapor verisi ureticisi** - `data/rapor_olcumleri.csv`'deki satirlari kayitli cekimlerden yeniden olcup CSV + markdown tablo + dogrulama levhasi uretir. |
+| `src/npz_oku.py` | Cekim/parametre dosyalarini okuma, `--parametreler` ile tum ayarlari tek ciktida dokme. |
 | `src/kutu_gorsel.py` | **Dogrulama gorseli** — goruntu uzerine renk kodlu 3B kutu + iki nokta bulutu paneli. `--zemin` ile zemin cikarilmis haritadan olcer ve kesilen tabani geri ekler. |
 | `src/tikla_olc.py` | CLI tiklayarak olcum (PCA kutusu). |
 | `src/cisim_olc.py` | Kayitli cekimden duzlem tabanli boyut olcumu. |

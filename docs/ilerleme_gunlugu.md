@@ -1088,6 +1088,57 @@ yuksekligi **-128 mm** (duzlemin ALTINDA), bu yuzden `yukseklik`
 kriteri hic sonuc uretmedi. Duzlem sorunu (ChArUco periyodik deseni)
 hala acik.
 
+
+### RAPOR VERISI URETICISI (2026-08-20)
+
+`src/rapor_verisi.py` - staj raporu icin veriyi elle kopyalamak
+yerine kayitli cekimlerden YENIDEN olcup uretir. Kod ya da
+kalibrasyon degisirse tablolar da degisir; elle kopyalanan sayi
+dogrulanamaz.
+
+**Girdi:** `data/rapor_olcumleri.csv` - hangi cekimde nereye
+tiklandi, cismin GERCEK olculeri ne. Yeni olcum eklemek icin bu
+dosyaya satir eklemek yeterli.
+
+**Cikti:**
+
+| Dosya | Icerik |
+|---|---|
+| `rapor_olcumler.csv` | her olcum + hata yuzdesi |
+| `rapor_duyarlilik.csv` | tol 15/30/60 taramasi ve yayilim |
+| `rapor_sistem.csv` | sistem parametreleri ve turevleri |
+| `rapor_tablolari.md` | rapora yapistirilabilir markdown tablolar |
+| `rapor_dogrulama_levhasi.png` | bes dogrulama gorseli tek levhada |
+
+`--gorsel` bayragi her olcum icin `kutu_gorsel.py` ciktisini da
+uretir ve tek levhada birlestirir. Hata %5'in altindaysa serit
+basligi yesil, ustundeyse kirmizi.
+
+**Uretilen ana sonuc tablosu (tol 30, gri 35, sinir 300):**
+
+| Cisim | Bakis | Mesafe | Gercek UZUN | Olculen | Hata |
+|---|---|---|---|---|---|
+| termos | yandan | 610 mm | 250 | 252.2 | **+0.9%** |
+| termos | yandan | 609 mm | 250 | 256.8 | +2.7% |
+| termos | yandan | 625 mm | 250 | 255.2 | +2.1% |
+| termos | tepeden | 561 mm | 250 | 290.5 | +16.2% |
+| termos | tepeden | 718 mm | 250 | 204.7 | -18.1% |
+
+Levhada gozle de goruluyor: yandan olcumlerde kutu cismi sariyor,
+tepeden olcumlerde sarmıyor.
+
+**Rapor bolumlerinin durumu (araç kendi ciktisinda da yaziyor):**
+
+| Bolum | Durum |
+|---|---|
+| 5.2 Mesafeye gore hata egrisi | KISMEN - 3 nokta var, ayni bakisla 4+ gerek |
+| 5.3 Tekrarlanabilirlik | YOK - ayni kurulumda 10 olcum |
+| 5.4 Calisma zarfi | TEORIK - olcumle dogrulanmali |
+| 5.5 Kalibrasyon kalitesinin etkisi | YOK |
+| 5.6 Yontem karsilastirmasi | **VAR** - duyarlilik tablosu |
+| 5.9 Ana sonuc tablosu | KISMEN - 1 cisim, 5 gerek |
+| 5.10 Fiziksel dogrulama | YOK |
+
 ---
 
 ## Yapilacaklar / Sonraki Adimlar
