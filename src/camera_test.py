@@ -303,6 +303,11 @@ class CameraApp:
         self._zoom_c = None       # yakinlastirma merkezi (birlesik koord)
         self._zoom_crop = (0, 0)  # kirpma sol-ust kosesi
         self._pre_ground_dsp = None
+        # _depth_olcum yalnizca _depth_worker calisinca olusuyordu;
+        # derinlik hic acilmadan "Zemin tespit et" denince
+        # AttributeError veriyor ve tespit tamamen basarisiz oluyordu.
+        # Burada tanimlanarak kok neden kapatildi.
+        self._depth_olcum = None
         self._son_olcum = None
         self._bekleyen = {}
         self._current_dsp = None
@@ -3729,7 +3734,7 @@ class CameraApp:
             dsp_ref2 = getattr(self, "_pre_ground_dsp", None)
             if dsp_ref2 is None:
                 with self._depth_lock:
-                    dsp_ref2 = self._depth_olcum
+                    dsp_ref2 = getattr(self, "_depth_olcum", None)
             if dsp_ref2 is not None and dsp_ref2.shape[:2] == gray.shape[:2]:
                 dn, dd2, ic_oran, der_not = self._tahtadan_derinlik_duzlemi(
                     img_pts, dsp_ref2, self.calib_data["Q"])
@@ -3795,7 +3800,7 @@ class CameraApp:
                 dsp_t = getattr(self, "_pre_ground_dsp", None)
                 if dsp_t is None:
                     with self._depth_lock:
-                        dsp_t = self._depth_olcum
+                        dsp_t = getattr(self, "_depth_olcum", None)
                 if dsp_t is not None and dsp_t.shape[:2] == gray.shape[:2]:
                     dv = dsp_t[(mk_ > 0) & (dsp_t > 0)]
                     if dv.size > 500:
@@ -3817,7 +3822,7 @@ class CameraApp:
                 dsp_k = getattr(self, "_pre_ground_dsp", None)
                 if dsp_k is None:
                     with self._depth_lock:
-                        dsp_k = self._depth_olcum
+                        dsp_k = getattr(self, "_depth_olcum", None)
                 if dsp_k is not None and dsp_k.shape[:2] == gray.shape[:2]:
                     pts_k = cv2.reprojectImageTo3D(
                         dsp_k.astype(np.float32), self.calib_data["Q"]) * 1000.0
