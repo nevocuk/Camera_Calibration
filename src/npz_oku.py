@@ -121,8 +121,10 @@ def png_yaz(z, yol):
         n = np.zeros(d.shape, np.uint8)
         gec = d > 0
         if gec.any():
+            # NumPy 2'de ndarray.ptp kaldirildi; np.ptp kullaniliyor
+            aralik = float(np.ptp(d[gec]))
             n[gec] = np.clip((d[gec] - d[gec].min())
-                             / max(d[gec].ptp(), 1e-6) * 255, 0, 255)
+                             / max(aralik, 1e-6) * 255, 0, 255)
         p = f"{kok}_{k}_export.png"
         cv2.imwrite(p, cv2.applyColorMap(n, cv2.COLORMAP_TURBO)
                     * gec[:, :, None])
