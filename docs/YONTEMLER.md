@@ -3,7 +3,7 @@
 > Her adimda **hangi yontem**, **neden o yontem**, **hangi parametrelerle**,
 > **hangi dosyada** ve **neyi denedik de olmadi**.
 > Sayilarin tamami gercek cekimlerle olculdu; teorik degil.
-> Son guncelleme: 2026-08-19.
+> Son guncelleme: 2026-08-20.
 
 ## Icindekiler
 1. [Boru hatti ozeti](#1-boru-hatti-ozeti)
@@ -401,6 +401,8 @@ Sonra `MORPH_CLOSE` (2 tur) + `MORPH_OPEN` (1 tur) eliptik 7x7,
 
 **Sinir:** Arka plan karesi gerekir; sahne degisirse bozulur.
 
+> **Bes yontem denendi, ucu ise yariyor.** Ozet tablo bolum 12C'de.
+
 ### B) Tiklayarak bolge buyutme (`_measure_click_pca`, `kutu_gorsel.py::segmentle`)
 `cv2.floodFill` ile **disparity uzerinde** tohumdan bolge buyutulur
 (`FLOODFILL_FIXED_RANGE` — tohuma gore sabit esik, komsu farki degil).
@@ -427,6 +429,36 @@ secilir (en buyuk bilesen degil).
 derinlik **sicramaz**; bolge kesintisiz masaya akar. Kamera yuzeye
 ~80 derece ile baktigi icin masa da genis bir derinlik araligina yayilir.
 
+5. **Kenar engeli** (`kenar`, |grad I|) ve **basamak engeli**
+   (`basamak`, |grad Z| mm/px). Esigi asan pikseller duvar yapilir.
+   Seviye esiginin (gri) aksine cismin **icini bolmez**, yalnizca
+   sinirini duvar yapar.
+   *Esik dayanagi olculdu:* duz yuzey 0.2-2 mm/px, cisim siniri
+   10+ mm/px; iyi deger 3.
+   *Kazanci — kararlilik.* ORTA eksenin tol 15/30/60 yayilimi,
+   6 cekim: `gri35+kenar60` 15/24/3/31/65/16 mm,
+   `gri35+kenar30+basamak3` **3/0/3/12/31**/24 mm.
+
+**Bu ailenin YAPISAL SINIRI (2026-08-20 olculdu):** bir engel bolgeyi
+**buyutemez, yalnizca kucultebilir**. Cisim bakis dogrultusunda
+uzaniyorsa bolge zaten cismin ortasinda durur ve engel hic devreye
+girmez:
+
+| | Deger |
+|---|---|
+| Bolge (ayakta sise, tol 30) | gercek cismin **%25**'i |
+| Bolgenin durdugu yerdeki basamak | **3.91 mm/px** (kenar YOK) |
+| Cismin gercek siluetindeki basamak | 48.57 mm/px |
+
+Ayrica cisim yuzeye **degdigi** yerde basamak yoktur (yatik silindir
+masaya tegettir); basamak tek basina 392.9 mm veriyor ve esigi 3'ten
+12'ye cikarmak sonucu degistirmiyor.
+
+**"Komsuya gore yayil" (FIXED_RANGE kapali) denendi:** bolge karenin
+**%68-81**'ine yayiliyor, basamak engeli acikken bile. Masa yumusak
+bir rampa; cisimden odanin her yerine dusuk basamakli bir yol var.
+Yayilarak calisan her kriter ya erken durur ya kacar.
+
 ---
 
 ## 13. Boyut cikarma
@@ -443,6 +475,75 @@ SVD, nokta bulutunun kendi dogal eksenlerini bulur — kutu cisme oturur.
 
 **Neden %1/%99 (min/max degil):** Tek bir aykiri nokta kutuyu uzatir.
 Yuzdelik kirpma bunu engeller.
+
+### B2) Yukseklik kriteri (`--yukseklik`) — yayilma YOK
+Her piksel **sabit bir referansa** karsi olculur:
+**duzlemden >= h mm yukarida VE tiklamaya duzlem uzerinde <= r mm
+yanal uzaklikta.** Tolerans hic kullanilmaz, dolayisiyla sonuc ona
+duyarsizdir; mutlak bir olcut oldugu icin ne erken durur ne kacar.
+
+Olculdu (ayakta sise, tepeden, gercek ~250 mm):
+
+| Yontem | Sonuc |
+|---|---|
+| Derinlik toleransi 15/30/60 | 65 / 83 / 158 mm |
+| h=15 yanal=45 | **248.4 mm** |
+| h=15 yanal=70 | 247.4 mm |
+| h=25 yanal=45 | 247.7 mm |
+| h=25 yanal=70 | 247.0 mm |
+
+**Sinir:** gecerli bir zemin duzlemi gerektirir.
+
+### B3) Watershed (`--watershed`) — duzlem GEREKTIRMEZ
+Kenar haritasinin ayrimi zaten cok iyi:
+
+| | \|grad I\| medyan | \|grad Z\| medyan |
+|---|---|---|
+| Siluet | 108.3 | 22.28 |
+| Cismin ici | 5.7 | 0.22 |
+
+19-100 kat ayrim — esik sorunu yok. Ama bu duvarlari `floodFill`'e
+verip toleransi serbest birakmak **tutmuyor**:
+
+| Ayar | Kapsam | Saflik |
+|---|---|---|
+| kenar 30 basamak 3 | %43 | %9 |
+| kenar 20 basamak 2 | %39 | %87 |
+| kenar 80 basamak 10 | %98 | %17 |
+
+Sebep **topolojik**: floodFill'in tutmasi icin duvarin HER YERDE
+kapali olmasi gerekir; olculdu, siluetin en fazla **%86**'si duvar
+oluyor ve kalan %14'un tek pikselinden bolge kaciyor. Bosluk kapatma
+(3-9 px) da cozmuyor.
+
+**Watershed'de bu sart yok** — her piksel gradyan sirtlarini asmadan
+ulastigi en yakin isaretciye atanir, tek delik bozmaz. Isaretciler:
+tiklanan nokta cevresi = cisim, uzak halka = arka plan.
+
+| Ayar | Sonuc | Kapsam | Saflik |
+|---|---|---|---|
+| ic_r 25, dis_r 400 | **248.9 x 75.9** | %99 | %93 |
+| ic_r 25, dis_r 550 | 249.0 x 76.1 | %98 | %93 |
+| ic_r 60, dis_r 400 | 248.9 x 75.9 | %99 | %93 |
+| ic_r 60, dis_r 550 | 249.0 x 76.0 | %98 | %93 |
+
+**Yalnizca PARLAKLIK uzerinde calistirilmali.** Derinligi karistirmak
+bozuyor (kapsam %99 -> %60-82, saflik %93 -> %45-69): WLS ile
+yumusatilmis derinlik haritasinin kenarlari parlaklik kadar keskin
+degil.
+
+### C) Hangi durumda hangisi
+
+| Durum | Yontem |
+|---|---|
+| Cisim goruntu duzlemine paralel yatiyor | derinlik toleransi + `gri`/`kenar`/`basamak` |
+| Cisim ayakta, kamera tepeden | **`watershed`** (duzlem gerekmez) ya da `yukseklik` |
+| Duzlem guvenilir, taban olcusu de lazim | `yukseklik` + taban geri kazanimi |
+
+**Altta yatan kural:** kamera cismin en buyuk yuzlerini gormeli.
+**Kameraya dogru bakan eksen olculemeyen eksendir.** Tepeden bakis
+masada YATAN cisimler icin dogru, AYAKTA duran uzun cisim icin en
+kotu acidir (termos yatirilinca uzun eksen 78 -> 284 mm'ye cikti).
 
 ### Duzlem tabanli olcum (`measurement.py::measure_3d_bbox`)
 Zemin normali `n` yukseklik ekseni; duzlem uzerinde iki dik eksen
