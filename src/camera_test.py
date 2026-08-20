@@ -1714,6 +1714,12 @@ class CameraApp:
         #   yukseklik kriteri  h 15/25, yanal 45/70 -> 248 / 247 / 248 / 247
         # VARSAYILAN KAPALI (0).
         self.pca_yukseklik_var = tk.IntVar(value=0)
+        # WATERSHED: iyi kenarlari kapali cevrit gerektirmeden kullanir.
+        # Zemin duzlemi GEREKMEZ - yukseklik kriterinin tek dezavantaji
+        # buydu. Olculdu (ayakta sise, gercek 250x72): 248.9 x 75.9 mm,
+        # kapsam %99 / saflik %93, dort farkli ayarda ayni.
+        # VARSAYILAN KAPALI (0).
+        self.pca_watershed_var = tk.IntVar(value=0)
         self.pca_duzlem_var = tk.BooleanVar(value=False)
         # Kutu gorselini ZEMIN CIKARILMIS haritadan uret. Olculdu
         # (q_20260819_170641, termos 250x72x36, tikla 1373,1045):
@@ -1872,6 +1878,35 @@ class CameraApp:
         sp_yk.pack(side=tk.LEFT)
         ipucu(sp_yk, IP_YUK)
         soru(btn_row2, IP_YUK).pack(side=tk.LEFT, padx=(2, 0))
+        IP_WS = ("WATERSHED segmentasyonu. Deger = arka plan halkasinin "
+                 "yaricapi (piksel). 0 = kapali. Onerilen 400-550.\n\n"
+                 "Kenar engelleri cismin sinirini zaten cok iyi buluyor "
+                 "(olculdu: siluette |grad I| 108.3, cismin icinde 5.7 - "
+                 "19 kat ayrim). Ama o duvarlari floodFill'e vermek "
+                 "yetmiyor: tutmasi icin duvarin HER YERDE kapali olmasi "
+                 "gerekiyor ve en iyi durumda siluetin %86'si duvar "
+                 "oluyor - kalan bosluktan bolge kaciyor.\n\n"
+                 "Watershed'de bu sart yok; her piksel en kolay ulastigi "
+                 "isaretciye atanir, tek delik her seyi bozmaz.\n\n"
+                 "Olculdu (ayakta sise, tepeden, gercek 250 x 72 mm):\n"
+                 "  derinlik toleransi 15/30/60 -> 65 / 83 / 158 mm\n"
+                 "  watershed (4 farkli ayar)   -> 248.9 / 249.0 /\n"
+                 "                                 248.9 / 249.0 mm\n"
+                 "  kapsam %99, saflik %93\n\n"
+                 "YUKSEKLIK kriterinden farki: zemin duzlemi GEREKMEZ.\n"
+                 "Bu modda tol/gri/kenar/basamak kullanilmaz; yalnizca "
+                 "'sinir mm' 3B uzaklik siniri olarak calisir.")
+        lbl_ws = tk.Label(btn_row2, text="watershed:", bg=CARD, fg=MUTED,
+                          font=("Segoe UI", 8))
+        lbl_ws.pack(side=tk.LEFT, padx=(6, 2))
+        ipucu(lbl_ws, IP_WS)
+        sp_ws = tk.Spinbox(btn_row2, from_=0, to=900, increment=50, width=4,
+                           textvariable=self.pca_watershed_var, bg=BG, fg=FG,
+                           buttonbackground=BORDER, relief="flat",
+                           font=("Segoe UI", 9))
+        sp_ws.pack(side=tk.LEFT)
+        ipucu(sp_ws, IP_WS)
+        soru(btn_row2, IP_WS).pack(side=tk.LEFT, padx=(2, 0))
         cb_dz = tk.Checkbutton(btn_row2, text="masayi at",
                                variable=self.pca_duzlem_var,
                                bg=CARD, fg=FG, selectcolor=BG,
@@ -4577,7 +4612,8 @@ class CameraApp:
                  "--gri", str(self.pca_gri_var.get()),
                  "--kenar", str(self.pca_kenar_var.get()),
                  "--basamak", str(self.pca_basamak_var.get()),
-                 "--yukseklik", str(self.pca_yukseklik_var.get())]
+                 "--yukseklik", str(self.pca_yukseklik_var.get()),
+                 "--watershed", str(self.pca_watershed_var.get())]
                 + (["--zemin"] if self.pca_zemin_var.get() else []),
                 capture_output=True, text=True, timeout=90)
             cikti = (r.stdout or "") + (r.stderr or "")
