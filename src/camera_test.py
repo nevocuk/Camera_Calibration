@@ -3293,6 +3293,48 @@ class CameraApp:
                          "Tahta bukuk/kalkik olabilir, isigi artir.", fg=RED)
                 return
 
+            # --- SAHNEYE KARSI DOGRULAMA ---
+            # Tahta masadan yuksekte durursa tespit metrikleri temiz
+            # cikar ama duzlem yanlis yerdedir. Sahnenin kendi baskin
+            # duzlemiyle karsilastirip kullaniciya SAYIYLA soyluyoruz.
+            sapma_metni, sapma_renk = "", None
+            try:
+                dsp_k = getattr(self, "_pre_ground_dsp", None)
+                if dsp_k is None:
+                    with self._depth_lock:
+                        dsp_k = self._depth_olcum
+                if dsp_k is not None and dsp_k.shape[:2] == gray.shape[:2]:
+                    pts_k = cv2.reprojectImageTo3D(
+                        dsp_k.astype(np.float32), self.calib_data["Q"]) * 1000.0
+                    gec_k = (dsp_k > 0) & np.isfinite(pts_k).all(axis=2)
+                    sn, sd, oran = self._sahne_duzlemi(pts_k, gec_k)
+                    if sn is not None and oran > 0.10:
+                        if float(sn @ normal) < 0:
+                            sn, sd = -sn, -sd
+                        d_aci = float(np.degrees(np.arccos(
+                            np.clip(abs(float(normal @ sn)), -1.0, 1.0))))
+                        d_ote = abs(abs(d * 1000.0) - abs(sd))
+                        # Esik secimi olculdu (2026-08-20, 5 cekim x 6
+                        # RANSAC kosusu): OTELEME kararli (48-56 mm,
+                        # kosular arasi salinim +-1.5 mm), ACI ise 2.4-11
+                        # derece arasi oynuyor cunku RANSAC bazen masa
+                        # yerine laptop/kutu yuzeyini seciyor. Bu yuzden
+                        # asil olcut oteleme; aci sinirini genis tuttuk.
+                        if d_ote > 15.0 or d_aci > 10.0:
+                            sapma_metni = (
+                                f"  !! SAHNEYLE UYUSMUYOR: duzlem sahnenin "
+                                f"baskin yuzeyinden {d_ote:.0f} mm otede, "
+                                f"aci farki {d_aci:.1f} derece. Tahta masaya "
+                                f"DUZ yatirilmali (kutu/kitap uzerinde ya da "
+                                f"elde olmamali). Zemin cikarma bu haliyle "
+                                f"cismin altini da siler.")
+                            sapma_renk = RED
+                        else:
+                            sapma_metni = (f"  (sahneyle uyumlu: {d_ote:.0f} mm, "
+                                           f"{d_aci:.1f} derece)")
+            except Exception:
+                pass
+
             np.savez(GROUND_PATH,
                      normal=normal, d=d,
                      K=K, D=D,
@@ -3310,10 +3352,42 @@ class CameraApp:
             self.lbl_ground.config(
                 text=f"Zemin kaydedildi: {n_kose} kose, izdusum {rms:.2f} px, "
                      f"bakis acisi {aci:.1f} derece, duzlem {mesafe:.0f} mm, {gerekce}. "
-                     f"Olcum icin kutucugu isaretle.{uyari}",
-                fg=YELLOW if aci > 70 else GREEN)
+                     f"Olcum icin kutucugu isaretle.{uyari}{sapma_metni}",
+                fg=sapma_renk or (YELLOW if aci > 70 else GREEN))
         except Exception as ex:
             self.lbl_ground.config(text=f"Zemin tespiti hatasi: {ex}", fg=RED)
+
+    @staticmethod
+    def _sahne_duzlemi(pts, gec, tur=600, esik=6.0, ornek=60000):
+        """Sahnenin BASKIN duzlemini RANSAC ile bul (mm, kamera cercevesi).
+
+        Amaci ChArUco duzlemini DOGRULAMAK. ChArUco tahtasi masadan
+        yuksekte durursa (kutu/kitap uzerinde, ya da elde tutulurken)
+        tespit metrikleri (kose sayisi, izdusum hatasi) mukemmel gorunur
+        ama duzlem yanlis yerdedir. Olculdu 2026-08-20: 96 kose,
+        izdusum 0.34 px, buna ragmen duzlem masadan 53 mm yukarida;
+        zemin cikarma sahnenin %69'unu ve cismin altini sildi.
+        """
+        Q = pts[gec]
+        if len(Q) < 5000:
+            return None, None, 0.0
+        rng = np.random.default_rng(0)
+        S = Q[rng.choice(len(Q), min(ornek, len(Q)), replace=False)]
+        en, en_n, en_d = 0, None, None
+        for _ in range(tur):
+            a, b, cc = S[rng.choice(len(S), 3, replace=False)]
+            nn = np.cross(b - a, cc - a)
+            L = float(np.linalg.norm(nn))
+            if L < 1e-9:
+                continue
+            nn = nn / L
+            dd = float(-nn @ a)
+            say = int((np.abs(S @ nn + dd) < esik).sum())
+            if say > en:
+                en, en_n, en_d = say, nn, dd
+        if en_n is None:
+            return None, None, 0.0
+        return en_n, en_d, en / len(S)
 
     @staticmethod
     def _clean_object_mask(mask, min_alan=1500, kapama=9):
