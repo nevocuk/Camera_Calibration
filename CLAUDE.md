@@ -34,6 +34,9 @@ camera proje/
 │   └── box_templates/      # Kesim yonergesi PDF/DXF
 ├── patterns/               # Basima hazir kalibrasyon desenleri
 └── docs/                   # Rapor (Ek-4 docx)
+    ├── PROJE_KONTEXT.md    # Tam kontext (kararlar, riskler)
+    ├── YONTEMLER.md        # Hangi adimda hangi yontem, neden
+    └── ilerleme_gunlugu.md # Gun gun olcumler
 ```
 
 ## Olcum defteri kurallari
