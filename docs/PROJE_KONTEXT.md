@@ -2,6 +2,10 @@
 
 > Bu dosya, projeye sifirdan baslayacak bir modelin hizlica tam resmi gorebilmesi icin yazildi.
 > Son guncelleme: 2026-08-19.
+>
+> **Yontem ayrintilari icin:** [YONTEMLER.md](YONTEMLER.md) — her
+> adimda hangi yontem, neden o yontem, hangi parametrelerle,
+> hangi dosyada ve neyi denedik de olmadi.
 
 ---
 
