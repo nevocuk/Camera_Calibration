@@ -1663,6 +1663,12 @@ class CameraApp:
         # tam merkezine tiklandiginda bile "destek yuzeyinde" diyor.
         # Fikir yalnizca bolge derinlikce kalin oldugunda anlamli.
         self.pca_gri_var = tk.IntVar(value=35)
+        # KENAR ve BASAMAK engelleri: 'gri tol' bir SEVIYE esigidir ve
+        # cisme bagimlidir. Bu ikisi cismin SINIRINI duvar yapar, icini
+        # serbest birakir. Ikisi de VARSAYILAN KAPALI - mevcut davranis
+        # degismesin diye.
+        self.pca_kenar_var = tk.IntVar(value=0)
+        self.pca_basamak_var = tk.DoubleVar(value=0.0)
         self.pca_duzlem_var = tk.BooleanVar(value=False)
         # Kutu gorselini ZEMIN CIKARILMIS haritadan uret. Olculdu
         # (q_20260819_170641, termos 250x72x36, tikla 1373,1045):
@@ -1747,6 +1753,53 @@ class CameraApp:
         sp_sn.pack(side=tk.LEFT)
         ipucu(sp_sn, IP_SINIR)
         soru(btn_row2, IP_SINIR).pack(side=tk.LEFT, padx=(2, 0))
+        IP_KENAR = ("PARLAKLIK BASAMAGI engeli (|grad I|). 0 = kapali.\n\n"
+                    "'gri tol' bir SEVIYE esigidir: tohumdan cok farkli "
+                    "parlaklikta olan HER pikseli atar, yani cismin kendi "
+                    "kapagi/etiketi farkli renkteyse onu da atar.\n\n"
+                    "Kenar engeli bunun yerine yalnizca SINIRI duvar yapar: "
+                    "parlaklik degisiminin buyuk oldugu pikseller "
+                    "sifirlanir, bolge nesne sinirini asamaz ama cismin "
+                    "ici serbest kalir.\n\n"
+                    "Olculen iyi deger: 30. Daha buyuk (60-100) zayif "
+                    "kenarlari kacirir, daha kucuk cismin icini boler.")
+        lbl_kn = tk.Label(btn_row2, text="kenar:", bg=CARD, fg=MUTED,
+                          font=("Segoe UI", 8))
+        lbl_kn.pack(side=tk.LEFT, padx=(6, 2))
+        ipucu(lbl_kn, IP_KENAR)
+        sp_kn = tk.Spinbox(btn_row2, from_=0, to=200, increment=10, width=4,
+                           textvariable=self.pca_kenar_var, bg=BG, fg=FG,
+                           buttonbackground=BORDER, relief="flat",
+                           font=("Segoe UI", 9))
+        sp_kn.pack(side=tk.LEFT)
+        ipucu(sp_kn, IP_KENAR)
+        IP_BAS = ("DERINLIK BASAMAGI engeli (mm / piksel). 0 = kapali.\n\n"
+                  "Tam senin istedigin sey: bolge tohumdan yayilirken "
+                  "ADIM ADIM degisime bakar, degisim buyuk oldugunda "
+                  "durur. Parlaklikla degil DERINLIKLE calistigi icin "
+                  "cismin rengine ve buyuklugune BAGLI DEGILDIR.\n\n"
+                  "Olculen |grad Z| dagilimi:\n"
+                  "  duz yuzey     ~0.2 - 2 mm/px\n"
+                  "  cisim siniri  10+ mm/px\n"
+                  "  (masa sacilimi 1.15 mm, 26 derece egimde 0.18 mm/px)\n"
+                  "Iyi deger: 3\n\n"
+                  "Olculen kazanc - ORTA eksenin tol 15/30/60 yayilimi:\n"
+                  "  gri35+kenar60        : 15 / 24 / 31 / 65 mm\n"
+                  "  gri35+kenar30+basamak3: 3 /  0 / 12 / 31 mm\n\n"
+                  "SINIR: cisim yuzeye DEGDIGI yerde basamak yoktur "
+                  "(yatik silindir masaya tegettir). Tek basina yetmez, "
+                  "gri veya kenar ile BIRLIKTE kullan.")
+        lbl_bs = tk.Label(btn_row2, text="basamak:", bg=CARD, fg=MUTED,
+                          font=("Segoe UI", 8))
+        lbl_bs.pack(side=tk.LEFT, padx=(6, 2))
+        ipucu(lbl_bs, IP_BAS)
+        sp_bs = tk.Spinbox(btn_row2, from_=0, to=50, increment=1, width=4,
+                           textvariable=self.pca_basamak_var, bg=BG, fg=FG,
+                           buttonbackground=BORDER, relief="flat",
+                           font=("Segoe UI", 9))
+        sp_bs.pack(side=tk.LEFT)
+        ipucu(sp_bs, IP_BAS)
+        soru(btn_row2, IP_BAS).pack(side=tk.LEFT, padx=(2, 0))
         cb_dz = tk.Checkbutton(btn_row2, text="masayi at",
                                variable=self.pca_duzlem_var,
                                bg=CARD, fg=FG, selectcolor=BG,
@@ -4285,7 +4338,9 @@ class CameraApp:
                  "--nokta", f"{int(sx)},{int(sy)}",
                  "--sinir", str(self.pca_sinir_var.get()),
                  "--tol", str(self.pca_tol_var.get()),
-                 "--gri", str(self.pca_gri_var.get())]
+                 "--gri", str(self.pca_gri_var.get()),
+                 "--kenar", str(self.pca_kenar_var.get()),
+                 "--basamak", str(self.pca_basamak_var.get())]
                 + (["--zemin"] if self.pca_zemin_var.get() else []),
                 capture_output=True, text=True, timeout=90)
             cikti = (r.stdout or "") + (r.stderr or "")
@@ -4432,6 +4487,32 @@ class CameraApp:
                 calis_dsp[fark > gri_tol] = 0
                 if calis_dsp[sy, sx] <= 0:
                     calis_dsp = dsp          # tohum elendi, filtreyi atla
+            # KENAR ENGELI - parlaklik basamagi. Seviye esiginin aksine
+            # cismin icini bolmez, yalnizca sinirini duvar yapar.
+            kenar_esik = float(self.pca_kenar_var.get())
+            if kenar_esik > 0 and gri_kaynak is not None \
+                    and gri_kaynak.shape == dsp.shape:
+                bl = cv2.GaussianBlur(gri_kaynak, (5, 5), 0).astype(np.float32)
+                mag = np.hypot(cv2.Sobel(bl, cv2.CV_32F, 1, 0, ksize=3),
+                               cv2.Sobel(bl, cv2.CV_32F, 0, 1, ksize=3))
+                yeni = calis_dsp.copy()
+                yeni[mag > kenar_esik] = 0
+                if yeni[sy, sx] > 0:
+                    calis_dsp = yeni
+            # BASAMAK ENGELI - derinligin komsuya gore degisimi (mm/px).
+            # Cisme bagli degil; olculdu: duz yuzey ~0.2-2, sinir 10+.
+            basamak = float(self.pca_basamak_var.get())
+            if basamak > 0:
+                Zh = np.nan_to_num(pts0[:, :, 2], nan=0.0).astype(np.float32)
+                Zh = cv2.GaussianBlur(Zh, (3, 3), 0)
+                gmag = np.hypot(
+                    cv2.Sobel(Zh, cv2.CV_32F, 1, 0, ksize=3) / 8.0,
+                    cv2.Sobel(Zh, cv2.CV_32F, 0, 1, ksize=3) / 8.0)
+                gmag[calis_dsp <= 0] = np.float32(1e6)
+                yeni = calis_dsp.copy()
+                yeni[gmag > basamak] = 0
+                if yeni[sy, sx] > 0:
+                    calis_dsp = yeni
             m0 = np.zeros((H + 2, W + 2), np.uint8)
             im = calis_dsp.astype(np.float32).copy()
             cv2.floodFill(im, m0, (sx, sy), 0, loDiff=tol, upDiff=tol,
