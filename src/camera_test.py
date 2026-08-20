@@ -59,6 +59,95 @@ MUTED = "#636882"
 INPUT_BG = "#1a1a2a"
 
 
+class Ipucu:
+    """Fareyle uzerine gelince aciklama gosteren balon.
+
+    Neden gerekli: arayuzdeki kisaltmalar (tol, gri tol, sinir, esik)
+    ne oldugunu kendiliginden anlatmiyor ve yanlis anlasilinca olcum
+    bozuluyor. Ornek: "esik" bir boyut filtresi sanildi, oysa duzlem
+    otelemesi - cismin altini da kesiyor.
+
+    Tk'nin yerlesik tooltip'i yok; Toplevel + overrideredirect ile
+    kuruluyor. Gecikme, farenin ustunden gecerken balon patlamasin diye.
+    """
+
+    def __init__(self, widget, metin, gecikme=450, genislik=460):
+        self.widget = widget
+        self.metin = metin
+        self.gecikme = gecikme
+        self.genislik = genislik
+        self._is = None
+        self._pencere = None
+        widget.bind("<Enter>", self._gir, add="+")
+        widget.bind("<Leave>", self._cik, add="+")
+        widget.bind("<ButtonPress>", self._cik, add="+")
+
+    def _gir(self, _=None):
+        self._iptal()
+        self._is = self.widget.after(self.gecikme, self._goster)
+
+    def _cik(self, _=None):
+        self._iptal()
+        self._gizle()
+
+    def _iptal(self):
+        if self._is is not None:
+            try:
+                self.widget.after_cancel(self._is)
+            except Exception:
+                pass
+            self._is = None
+
+    def _goster(self):
+        if self._pencere is not None:
+            return
+        try:
+            x = self.widget.winfo_rootx() + 18
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        except Exception:
+            return
+        self._pencere = tk.Toplevel(self.widget)
+        self._pencere.wm_overrideredirect(True)
+        try:
+            self._pencere.wm_attributes("-topmost", True)
+        except Exception:
+            pass
+        cerceve = tk.Frame(self._pencere, bg=BORDER, bd=0)
+        cerceve.pack()
+        tk.Label(cerceve, text=self.metin, bg="#2b2b40", fg=FG,
+                 font=("Segoe UI", 9), justify="left", wraplength=self.genislik,
+                 padx=10, pady=7).pack(padx=1, pady=1)
+        # ekrandan tasmasin
+        self._pencere.update_idletasks()
+        gen = self._pencere.winfo_width()
+        ekran = self._pencere.winfo_screenwidth()
+        if x + gen > ekran - 10:
+            x = max(10, ekran - gen - 10)
+        self._pencere.wm_geometry(f"+{int(x)}+{int(y)}")
+
+    def _gizle(self):
+        if self._pencere is not None:
+            try:
+                self._pencere.destroy()
+            except Exception:
+                pass
+            self._pencere = None
+
+
+def ipucu(widget, metin):
+    """Kisayol: bir bilesene aciklama balonu bagla."""
+    Ipucu(widget, metin)
+    return widget
+
+
+def soru(parent, metin, bg=None):
+    """Yanina konulan kucuk '?' isareti - uzerine gelince aciklama."""
+    lbl = tk.Label(parent, text="?", bg=bg or CARD, fg=ACCENT,
+                   font=("Segoe UI", 9, "bold"), cursor="question_arrow")
+    Ipucu(lbl, metin)
+    return lbl
+
+
 def load_charuco():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, encoding="utf-8") as f:
@@ -1222,16 +1311,37 @@ class CameraApp:
             selectcolor=BORDER, activebackground=CARD, activeforeground=FG,
             font=("Segoe UI", 9))
         self.btn_clean_disp.pack(side=tk.LEFT)
+        ipucu(self.btn_clean_disp,
+              "Disparity haritasini temizle - uc adim sirayla:\n"
+              "  1. Median 5x5: tuz-biber gurultusu\n"
+              "  2. Morfolojik kapama 7x7: kucuk delikleri doldur\n"
+              "  3. 500 pikselden kucuk izole bolgeleri sil\n\n"
+              "Sira onemli: once nokta gurultusu gider, sonra delikler "
+              "kapanir, en son izole yamalar atilir. Ters sirada kucuk "
+              "gurultu yamalari birlesip 'buyuk bolge' gibi gorunurdu.")
 
         # CLAHE varsayilan KAPALI: 6 gercek cift uzerinde olculdu, acikken
         # derinlik haritasi parcalaniyor (sicrama 0.361 -> 0.419, >2px %1.5 -> %2.1).
         # Duz yuzeylerde gurultuyu yukselterek sahte doku/sahte eslesme uretiyor.
         self.clahe_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(
+        cb_clahe = tk.Checkbutton(
             btn_row2, text="CLAHE (kontrast art. - harita parcalanir)",
             variable=self.clahe_var, bg=CARD, fg=FG,
             selectcolor=BORDER, activebackground=CARD, activeforeground=FG,
-            font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(12, 0))
+            font=("Segoe UI", 9))
+        cb_clahe.pack(side=tk.LEFT, padx=(12, 0))
+        ipucu(cb_clahe,
+              "Yerel kontrast artirma. VARSAYILAN KAPALI - acmak haritayi "
+              "genelde BOZAR.\n\n"
+              "Neden: duz ve dokusuz yuzeylerde (duvar, masa) CLAHE'nin "
+              "yukselttigi sey sensor GURULTUSUDUR. SGBM bunu gercek doku "
+              "sanip sahte eslesme uretir.\n\n"
+              "Olculdu (6 gercek stereo cift, ayni veri):\n"
+              "  kapali    -> sicrama 0.361 | >2px %1.5\n"
+              "  CLAHE 1.0 -> 0.399 | %1.9\n"
+              "  CLAHE 2.0 -> 0.419 | %2.1\n\n"
+              "Merkez mesafe degeri etkilenmiyor; bozulan haritanin "
+              "butunlugu, yani kontur/hacim tabanli olcum.")
 
         # Iki kameranin ton egrileri donanimsal olarak farkli (olculdu:
         # SOL p5=92/std=38.6, SAG p5=47/std=63.3). Dogrusal mean/std transferi
@@ -1239,8 +1349,22 @@ class CameraApp:
         # Olcum: ton farki 27.8 -> 1.0, harita sicramasi 0.367 -> 0.249.
         btn_row3 = tk.Frame(c, bg=CARD)
         btn_row3.pack(fill=tk.X, pady=2)
-        tk.Label(btn_row3, text="Kamera ton eslemesi:", bg=CARD, fg=FG,
-                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        IP_TON = ("Iki kameranin parlaklik/ton farkini esitle.\n\n"
+                  "Gerekli, cunku iki kameranin ton egrisi DONANIMSAL "
+                  "olarak farkli (olculdu: SOL p5=92/std=38.6, "
+                  "SAG p5=47/std=63.3). SGBM ayni noktayi iki goruntude "
+                  "ayni parlaklikta gormezse eslestiremez.\n\n"
+                  "Olculdu (gercek cift):\n"
+                  "  Yok       -> ton farki 46.80 | sicrama 0.964\n"
+                  "  Dogrusal  -> 4.60 | 0.799   (mean/std transferi)\n"
+                  "  Histogram -> 0.20 | 0.795   (CDF eslemesi)\n\n"
+                  "Dogrusal yontem ortalamayi esitler ama DAGILIM farkini "
+                  "birakir; fark dogrusal olmadigi icin histogram gerekli.")
+        lbl_ton = tk.Label(btn_row3, text="Kamera ton eslemesi:", bg=CARD,
+                           fg=FG, font=("Segoe UI", 9))
+        lbl_ton.pack(side=tk.LEFT)
+        ipucu(lbl_ton, IP_TON)
+        soru(btn_row3, IP_TON).pack(side=tk.LEFT, padx=(3, 0))
         self.tone_var = tk.StringVar(value="histogram")
         for deger, etiket in (("histogram", "Histogram (onerilen)"),
                               ("dogrusal", "Dogrusal"),
@@ -1363,29 +1487,76 @@ class CameraApp:
         zem_row = tk.Frame(c, bg=CARD)
         zem_row.pack(fill=tk.X, pady=4)
         self.ground_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(zem_row, text="Zemin/masa cikar (OLCUM icin)",
-                       variable=self.ground_var, bg=CARD, fg=FG,
-                       selectcolor=BORDER, activebackground=CARD,
-                       activeforeground=FG, font=("Segoe UI", 9)
-                       ).pack(side=tk.LEFT)
-        tk.Label(zem_row, text="esik (mm):", bg=CARD, fg=MUTED,
-                 font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(10, 2))
+        cb_zem = tk.Checkbutton(zem_row, text="Zemin/masa cikar (OLCUM icin)",
+                                variable=self.ground_var, bg=CARD, fg=FG,
+                                selectcolor=BORDER, activebackground=CARD,
+                                activeforeground=FG, font=("Segoe UI", 9))
+        cb_zem.pack(side=tk.LEFT)
+        ipucu(cb_zem,
+              "Kayitli zemin duzlemine YAKIN pikselleri haritadan sil.\n\n"
+              "Yalnizca DESTEK YUZEYINI siler, arka plani DEGIL. Genis bir "
+              "sahnede duvar, raf ve oda gercekten masanin uzerindedir ve "
+              "dogru sekilde korunur.\n\n"
+              "Olculdu: sahnenin %11.7 kadari duzlem uzerinde, %73.1 "
+              "kadari duzlemin uzerinde kaliyor.\n\n"
+              "Bir GORUNTULEME modu degil, OLCUM aracidir - acikken "
+              "haritanin buyuk kismi silinir. Olcum yapacaginda ac.")
+        IP_ESIK = ("Duzlem OTELEMESI (mm) - boyut filtresi DEGIL.\n\n"
+                   "Kesme duzlemi masadan bu kadar yukari tasinir ve "
+                   "ALTINDA kalan her sey silinir. Cisim masada durdugu "
+                   "icin CISMIN ALT BU KADARI DA GIDER. Bu bir hata degil, "
+                   "tanimin kendisi.\n\n"
+                   "Kaybi 'zemin haritasi' secenegi olcup geri ekler "
+                   "(taban geri kazanimi).\n\n"
+                   "Buyuk deger secmek zorunda kaliyorsan muhtemelen "
+                   "duzlem kaymistir - 'Zemin tespit et' uyari veriyor mu "
+                   "bak. Olculdu: tahta masadan 53 mm yuksekte tespit "
+                   "edilince sahnenin %69 kadari silindi.")
+        lbl_es = tk.Label(zem_row, text="esik (mm):", bg=CARD, fg=MUTED,
+                          font=("Segoe UI", 8))
+        lbl_es.pack(side=tk.LEFT, padx=(10, 2))
+        ipucu(lbl_es, IP_ESIK)
         self.ground_th_var = tk.IntVar(value=12)
-        tk.Spinbox(zem_row, from_=3, to=100, width=4,
-                   textvariable=self.ground_th_var, bg=INPUT_BG, fg=YELLOW,
-                   font=("Consolas", 9), relief="flat",
-                   buttonbackground=BORDER).pack(side=tk.LEFT)
+        sp_es = tk.Spinbox(zem_row, from_=3, to=100, width=4,
+                           textvariable=self.ground_th_var, bg=INPUT_BG,
+                           fg=YELLOW, font=("Consolas", 9), relief="flat",
+                           buttonbackground=BORDER)
+        sp_es.pack(side=tk.LEFT)
+        ipucu(sp_es, IP_ESIK)
+        soru(zem_row, IP_ESIK).pack(side=tk.LEFT, padx=(2, 0))
         self.ground_clean_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(zem_row, text="maske temizle",
-                       variable=self.ground_clean_var,
-                       bg=CARD, fg=FG, selectcolor=BG,
-                       activebackground=CARD, activeforeground=FG,
-                       font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(8, 0))
-        tk.Button(zem_row, text="Zemin tespit et",
-                  command=self._detect_ground_plane,
-                  bg="#1a5276", fg="white", font=("Segoe UI", 9, "bold"),
-                  relief="flat", padx=10, pady=2,
-                  cursor="hand2").pack(side=tk.LEFT, padx=(10, 0))
+        cb_mt = tk.Checkbutton(zem_row, text="maske temizle",
+                               variable=self.ground_clean_var,
+                               bg=CARD, fg=FG, selectcolor=BG,
+                               activebackground=CARD, activeforeground=FG,
+                               font=("Segoe UI", 8))
+        cb_mt.pack(side=tk.LEFT, padx=(8, 0))
+        ipucu(cb_mt,
+              "Zemin cikarildiktan sonra kalan maskeyi toparla: kapama "
+              "(cisimdeki ince catlaklar), acma (masadan kalan benekler), "
+              "delik doldurma.\n\n"
+              "Gerekli, cunku cismin dokusuz yuzeylerinde gercek eslesme "
+              "yoktur; WLS oralari cevreden TAHMIN ederek doldurur ve "
+              "tahmin duzleme yakin duserse piksel yanlislikla zemin "
+              "sayilip silinir - cisim delik delik cikar.")
+        btn_zt = tk.Button(zem_row, text="Zemin tespit et",
+                           command=self._detect_ground_plane,
+                           bg="#1a5276", fg="white",
+                           font=("Segoe UI", 9, "bold"),
+                           relief="flat", padx=10, pady=2, cursor="hand2")
+        btn_zt.pack(side=tk.LEFT, padx=(10, 0))
+        ipucu(btn_zt,
+              "ChArUco tahtasindan masa duzlemini olc ve kaydet.\n\n"
+              "Tahtayi cismin duracagi yuzeye DUZ yatir. Kutu/kitap "
+              "uzerinde ya da elde tutarken olcersen duzlem yanlis yere "
+              "oturur - kose sayisi ve izdusum hatasi yine mukemmel "
+              "gorunur, hata gizli kalir.\n\n"
+              "Olculdu (2026-08-20): 96 kose, izdusum 0.34 px, buna ragmen "
+              "duzlem masadan 53 mm yukarida cikti ve zemin cikarma "
+              "sahnenin %69 kadarini sildi.\n\n"
+              "Tespit bitince sonuc sahnenin kendi duzlemiyle "
+              "karsilastirilir; 15 mm'den fazla oteleme varsa KIRMIZI "
+              "uyari cikar.")
         self.lbl_ground = tk.Label(c, text="", bg=CARD, fg=MUTED,
                                    font=("Segoe UI", 8), justify="left",
                                    anchor="w", wraplength=380)
@@ -1396,17 +1567,31 @@ class CameraApp:
         viz_row = tk.Frame(viz_c, bg=CARD)
         viz_row.pack(fill=tk.X, pady=4)
         self.contour_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(viz_row, text="Derinlik konturlari",
-                       variable=self.contour_var, bg=CARD, fg=FG,
-                       selectcolor=BORDER, activebackground=CARD,
-                       activeforeground=FG, font=("Segoe UI", 9)
-                       ).pack(side=tk.LEFT, padx=(0, 12))
+        cb_kont = tk.Checkbutton(viz_row, text="Derinlik konturlari",
+                                 variable=self.contour_var, bg=CARD, fg=FG,
+                                 selectcolor=BORDER, activebackground=CARD,
+                                 activeforeground=FG, font=("Segoe UI", 9))
+        cb_kont.pack(side=tk.LEFT, padx=(0, 12))
+        ipucu(cb_kont,
+              "Esit derinlik cizgilerini haritanin uzerine ciz (harita "
+              "seviyesi 30..230 arasi 8 kademe).\n\n"
+              "Yalnizca gorsel: yuzeyin egimini ve derinlik sicramalarini "
+              "gozle gormeyi kolaylastirir. Olcume girmez.")
         self.compare_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(viz_row, text="Ham / WLS karsilastir",
-                       variable=self.compare_var, bg=CARD, fg=FG,
-                       selectcolor=BORDER, activebackground=CARD,
-                       activeforeground=FG, font=("Segoe UI", 9)
-                       ).pack(side=tk.LEFT)
+        cb_hw = tk.Checkbutton(viz_row, text="Ham / WLS karsilastir",
+                               variable=self.compare_var, bg=CARD, fg=FG,
+                               selectcolor=BORDER, activebackground=CARD,
+                               activeforeground=FG, font=("Segoe UI", 9))
+        cb_hw.pack(side=tk.LEFT)
+        ipucu(cb_hw,
+              "Sag panelin SOL yarisi ham SGBM, SAG yarisi WLS filtreli "
+              "sonuc olsun.\n\n"
+              "Neden onemli: WLS bosluklari INTERPOLASYONLA doldurur. "
+              "Bu yuzden 'dolgulu %' bir kalite olcusu DEGILDIR - %100 "
+              "yazarken haritanin buyuk kismi tahmin olabilir. Gercek "
+              "olcut ham eslesme oranidir.\n\n"
+              "Ham tarafta genis siyah alanlar goruyorsan orada gercek "
+              "eslesme yok demektir; oradan alinan olcume guvenme.")
 
         c = self._section(tab, "Mesafe dogrulama [V]")
         vrow = tk.Frame(c, bg=CARD)
@@ -1498,33 +1683,101 @@ class CameraApp:
         # kaliyordu). Ikinci satira tasiniyor.
         btn_row2 = tk.Frame(c, bg=CARD)
         btn_row2.pack(fill=tk.X, pady=(0, 6))
-        tk.Label(btn_row2, text="tol mm:", bg=CARD, fg=MUTED,
-                 font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(0, 2))
-        tk.Spinbox(btn_row2, from_=5, to=200, increment=5, width=4,
-                   textvariable=self.pca_tol_var, bg=BG, fg=FG,
-                   buttonbackground=BORDER, relief="flat",
-                   font=("Segoe UI", 9)).pack(side=tk.LEFT)
-        tk.Label(btn_row2, text="gri tol:", bg=CARD, fg=MUTED,
-                 font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(6, 2))
-        tk.Spinbox(btn_row2, from_=0, to=120, increment=5, width=4,
-                   textvariable=self.pca_gri_var, bg=BG, fg=FG,
-                   buttonbackground=BORDER, relief="flat",
-                   font=("Segoe UI", 9)).pack(side=tk.LEFT)
-        tk.Label(btn_row2, text="sinir mm:", bg=CARD, fg=MUTED,
-                 font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(6, 2))
-        tk.Spinbox(btn_row2, from_=80, to=800, increment=25, width=5,
-                   textvariable=self.pca_sinir_var, bg=BG, fg=FG,
-                   buttonbackground=BORDER, relief="flat",
-                   font=("Segoe UI", 9)).pack(side=tk.LEFT)
-        tk.Checkbutton(btn_row2, text="masayi at", variable=self.pca_duzlem_var,
-                       bg=CARD, fg=FG, selectcolor=BG, activebackground=CARD,
-                       activeforeground=FG, font=("Segoe UI", 8)
-                       ).pack(side=tk.LEFT, padx=(8, 0))
-        tk.Checkbutton(btn_row2, text="zemin haritasi",
-                       variable=self.pca_zemin_var,
-                       bg=CARD, fg=FG, selectcolor=BG, activebackground=CARD,
-                       activeforeground=FG, font=("Segoe UI", 8)
-                       ).pack(side=tk.LEFT, padx=(4, 0))
+        IP_TOL = ("DERINLIK toleransi (mm) - disparity degil.\n\n"
+                  "Tikladigin noktadan baslayan bolge, derinligi tohumdan "
+                  "en fazla bu kadar farkli olan pikselleri alir. Mesafeye "
+                  "gore otomatik disparity'ye cevrilir (dd = f*B*dZ/Z^2), "
+                  "boylece 500 mm'de de 1500 mm'de de ayni fiziksel "
+                  "kalinligi kapsar.\n\n"
+                  "KUCUK: bolge cismin bir dilimini alir, olcu kucuk cikar.\n"
+                  "BUYUK: bolge masaya tasar, olcu buyuk cikar.\n\n"
+                  "Olculdu - yatik termos (gercek 250 mm):\n"
+                  "  tol 15 -> 284 mm | tol 30 -> 308 mm\n"
+                  "'zemin haritasi' isaretliyken bu duyarlilik kaybolur.")
+        lbl_tol = tk.Label(btn_row2, text="tol mm:", bg=CARD, fg=MUTED,
+                           font=("Segoe UI", 8))
+        lbl_tol.pack(side=tk.LEFT, padx=(0, 2))
+        ipucu(lbl_tol, IP_TOL)
+        sp_tol = tk.Spinbox(btn_row2, from_=5, to=200, increment=5, width=4,
+                            textvariable=self.pca_tol_var, bg=BG, fg=FG,
+                            buttonbackground=BORDER, relief="flat",
+                            font=("Segoe UI", 9))
+        sp_tol.pack(side=tk.LEFT)
+        ipucu(sp_tol, IP_TOL)
+        soru(btn_row2, IP_TOL).pack(side=tk.LEFT, padx=(2, 0))
+        IP_GRI = ("PARLAKLIK toleransi (0-255). 0 = kapali.\n\n"
+                  "Derinlik tek basina cismi masadan ayiramaz - cismin "
+                  "masaya degdigi yerde derinlik sicramasi yoktur. Ama "
+                  "cisim ile yuzeyin RENGI genelde farklidir. Tikladigin "
+                  "pikselin gri degerinden bu kadardan fazla sapan "
+                  "pikseller bolgeden atilir.\n\n"
+                  "Olculdu - koyu termos / beyaz masa:\n"
+                  "  kapali -> 340 x 272 mm (bolge masaya kacti)\n"
+                  "  45 -> 262 x 78 | 25 -> 258 x 70 | gercek 250 x 72\n\n"
+                  "DIKKAT: cismin farkli yerleri farkli parlakliktaysa "
+                  "(kapak, etiket, parlama) cismin bir kismini da atar. "
+                  "O durumda gevset ve kenar engeline guven.")
+        lbl_gri = tk.Label(btn_row2, text="gri tol:", bg=CARD, fg=MUTED,
+                           font=("Segoe UI", 8))
+        lbl_gri.pack(side=tk.LEFT, padx=(6, 2))
+        ipucu(lbl_gri, IP_GRI)
+        sp_gri = tk.Spinbox(btn_row2, from_=0, to=120, increment=5, width=4,
+                            textvariable=self.pca_gri_var, bg=BG, fg=FG,
+                            buttonbackground=BORDER, relief="flat",
+                            font=("Segoe UI", 9))
+        sp_gri.pack(side=tk.LEFT)
+        ipucu(sp_gri, IP_GRI)
+        soru(btn_row2, IP_GRI).pack(side=tk.LEFT, padx=(2, 0))
+        IP_SINIR = ("Tiklanan noktadan 3B kus ucusu uzaklik siniri (mm).\n\n"
+                    "Bolge ne kadar buyurse buyusun, tohuma bu mesafeden "
+                    "uzaktaki noktalar alinmaz. Bolgenin sahnenin yarisina "
+                    "yayilmasini yapisal olarak engeller.\n\n"
+                    "Olculdu: sinirsizken uzun eksen 635 mm cikti, "
+                    "200 mm sinirla 314 mm.\n\n"
+                    "Olcecegin cismin en uzun kenarindan biraz buyuk sec; "
+                    "cok kucuk secersen cismin ucunu keser.")
+        lbl_sn = tk.Label(btn_row2, text="sinir mm:", bg=CARD, fg=MUTED,
+                          font=("Segoe UI", 8))
+        lbl_sn.pack(side=tk.LEFT, padx=(6, 2))
+        ipucu(lbl_sn, IP_SINIR)
+        sp_sn = tk.Spinbox(btn_row2, from_=80, to=800, increment=25, width=5,
+                           textvariable=self.pca_sinir_var, bg=BG, fg=FG,
+                           buttonbackground=BORDER, relief="flat",
+                           font=("Segoe UI", 9))
+        sp_sn.pack(side=tk.LEFT)
+        ipucu(sp_sn, IP_SINIR)
+        soru(btn_row2, IP_SINIR).pack(side=tk.LEFT, padx=(2, 0))
+        cb_dz = tk.Checkbutton(btn_row2, text="masayi at",
+                               variable=self.pca_duzlem_var,
+                               bg=CARD, fg=FG, selectcolor=BG,
+                               activebackground=CARD, activeforeground=FG,
+                               font=("Segoe UI", 8))
+        cb_dz.pack(side=tk.LEFT, padx=(8, 0))
+        ipucu(cb_dz,
+              "Bolgenin ICINDEKI baskin duzlemi RANSAC ile bulup at.\n\n"
+              "VARSAYILAN KAPALI ve genelde acilmamali: bolge zaten ince "
+              "bir derinlik dilimi, yani KENDISI duzlemsel. RANSAC "
+              "ayirmak istedigimiz iki seyi de duzlem bulur.\n\n"
+              "Olculdu: bolgenin %69-100 kadari duzlem sayilip cisim "
+              "silindi. Yalnizca cisim belirgin sekilde duzlemsel "
+              "olmayan bir sahnede dene.")
+        cb_zh = tk.Checkbutton(btn_row2, text="zemin haritasi",
+                               variable=self.pca_zemin_var,
+                               bg=CARD, fg=FG, selectcolor=BG,
+                               activebackground=CARD, activeforeground=FG,
+                               font=("Segoe UI", 8))
+        cb_zh.pack(side=tk.LEFT, padx=(4, 0))
+        ipucu(cb_zh,
+              "Kutu gorseli ZEMIN CIKARILMIS haritayi kullansin ve esigin "
+              "kestigi tabani duzleme kadar geri eklesin.\n\n"
+              "Kazanci dogruluk degil DUYARSIZLIK: bolge masaya sizemedigi "
+              "icin sonuc tolerans ve parlaklik ayarindan bagimsiz cikar.\n\n"
+              "Olculdu (termos 250 x 72 mm):\n"
+              "  ham harita     tol 20 -> 263 | tol 60 -> 263\n"
+              "                 kisitlar kapali -> 362 x 324\n"
+              "  zemin haritasi tol 20 -> 254 | tol 60 -> 254\n"
+              "                 kisitlar kapali -> 254 x 69\n\n"
+              "SART: kareyi alirken 'Zemin/masa cikar' isaretli olmali.")
         tk.Button(btn_row2, text="Kutu gorseli",
                   command=self._save_box_visual,
                   bg="#4a2d6a", fg="white", font=("Segoe UI", 10, "bold"),
