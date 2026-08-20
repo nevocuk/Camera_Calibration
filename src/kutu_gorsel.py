@@ -180,6 +180,62 @@ def zemin_duzlemi(calib):
     return n, float(g["d"]) * 1000.0, None
 
 
+def segmentle_watershed(dsp, pts, gri, sx, sy, ic_r=40, dis_r=450,
+                        sinir=250):
+    """Watershed - iyi kenarlari KAPALI CEVRIT gerektirmeden kullan.
+
+    NEDEN: kenar/basamak engelleri cismin sinirini cok iyi buluyor
+    (olculdu: siluet |grad I| medyan 108.3, cismin ici 5.7 - 19 kat
+    ayrim). Ama bu duvarlari floodFill'e vermek yetmiyor, cunku
+    tutmak TOPOLOJIK bir sart: duvarin her yerde kapali olmasi
+    gerekir. Olculdu - en iyi durumda siluetin %86'si duvar oluyor,
+    kalan %14'lik bosluktan bolge kaciyor (kapsam %100 ama saflik %17).
+
+    Watershed'de boyle bir sart yok: her piksel, gradyan sirtlarini
+    asmadan ulasilabilen en yakin ISARETCIYE atanir. Tek bir delik
+    her seyi bozmaz.
+
+    Isaretciler: tiklanan nokta cevresi = cisim, uzak halka = arka
+    plan, arasi = watershed karar verir.
+
+    Olculdu (q_20260820_110729, ayakta sise, tepeden, gercek ~250x72):
+       ic_r 25 dis_r 400 -> 248.9 x 75.9  kapsam %99 saflik %93
+       ic_r 25 dis_r 550 -> 249.0 x 76.1  kapsam %98 saflik %93
+       ic_r 60 dis_r 400 -> 248.9 x 75.9
+       ic_r 60 dis_r 550 -> 249.0 x 76.0
+    Ayara duyarsiz. Karsilastirma: derinlik toleransi 65/83/158 mm.
+
+    NOT: watershed PARLAKLIK uzerinde calisir. Derinligi de karistirmak
+    olculdu ve BOZUYOR (kapsam %99 -> %60-82, saflik %93 -> %45-69);
+    derinlik haritasi WLS ile yumusatilmis oldugu icin kenarlari
+    parlaklik kadar keskin degil.
+    """
+    H, W = dsp.shape
+    yy, xx = np.mgrid[0:H, 0:W]
+    r = np.hypot(xx - sx, yy - sy)
+    isaret = np.zeros((H, W), np.int32)
+    isaret[r <= ic_r] = 1
+    isaret[r >= dis_r] = 2
+    im3 = cv2.cvtColor(cv2.GaussianBlur(gri, (5, 5), 0), cv2.COLOR_GRAY2BGR)
+    lab = isaret.copy()
+    cv2.watershed(im3, lab)
+    gec = (dsp > 0) & np.isfinite(pts).all(axis=2)
+    m = (lab == 1) & gec
+    tohum = pts[sy, sx]
+    if sinir and np.isfinite(tohum).all():
+        m &= np.linalg.norm(pts - tohum, axis=2) < sinir
+    m = cv2.morphologyEx(m.astype(np.uint8), cv2.MORPH_CLOSE,
+                         np.ones((7, 7), np.uint8)).astype(bool) & gec
+    nl, l2, st, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), 8)
+    if l2[sy, sx] > 0:
+        m = (l2 == l2[sy, sx])
+    elif nl > 1:
+        return None, "tiklanan nokta bolge disinda kaldi"
+    if m.sum() < 500:
+        return None, f"bolge cok kucuk ({int(m.sum())} px)"
+    return m, None
+
+
 def segmentle_yukseklik(dsp, pts, sx, sy, n_duz, d_mm, h_min, yanal_mm):
     """Derinlik yerine DUZLEMDEN YUKSEKLIK ile bolge sec.
 
@@ -349,6 +405,15 @@ def main():
                          "cisim siniri 10+ mm/px; iyi deger 3. "
                          "Cismin yuzeye DEGDIGI yerde basamak yoktur, "
                          "tek basina yetmez - gri/kenar ile birlikte kullan.")
+    ap.add_argument("--watershed", type=float, default=0.0,
+                    help="WATERSHED segmentasyonu. Deger = arka plan "
+                         "halkasinin yaricapi (piksel), 0 = kapali. "
+                         "Onerilen 400-550. Iyi kenarlari kapali cevrit "
+                         "gerektirmeden kullanir; zemin duzlemi GEREKMEZ. "
+                         "Olculdu: ayakta sisede 248.9 x 75.9 mm "
+                         "(gercek 250 x 72), derinlik toleransi ise "
+                         "65/83/158 mm veriyordu. --tol/--gri/--kenar/"
+                         "--basamak bu modda kullanilmaz.")
     ap.add_argument("--yukseklik", type=float, default=0.0,
                     help="YUKSEKLIK KRITERI (mm). 0 = kapali. Bolge, "
                          "derinlik toleransi yerine 'duzlemden en az bu "
@@ -391,7 +456,10 @@ def main():
 
     f_px = float(c['P1'][0, 0])
     B_mm = float(np.linalg.norm(c['T'])) * 1000.0
-    if a.yukseklik > 0:
+    if a.watershed > 0:
+        m, hata = segmentle_watershed(dsp, pts, z["gray_l"], sx, sy,
+                                      dis_r=a.watershed, sinir=a.sinir)
+    elif a.yukseklik > 0:
         yn, yd, yhata = zemin_duzlemi(c)
         if yn is None:
             print("HATA:", yhata)
@@ -431,7 +499,9 @@ def main():
           f"derinlik tol {a.tol:.0f} mm  gri tol {a.gri:.0f}"
           + (f"  kenar {a.kenar:.0f}" if a.kenar else "")
           + (f"  basamak {a.basamak:.1f} mm/px" if a.basamak else ""))
-    kriter = (f"YUKSEKLIK (h>={a.yukseklik:.0f} mm, yanal {a.sinir:.0f} mm)"
+    kriter = (f"WATERSHED (arka plan halkasi {a.watershed:.0f} px)"
+              if a.watershed > 0 else
+              f"YUKSEKLIK (h>={a.yukseklik:.0f} mm, yanal {a.sinir:.0f} mm)"
               if a.yukseklik > 0 else "derinlik toleransi")
     print(f"KRITER : {kriter}")
     print(f"HARITA : {'zemin cikarilmis' if a.zemin else 'ham (zemin duruyor)'}"
