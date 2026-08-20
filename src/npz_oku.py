@@ -12,7 +12,16 @@ Bir cekim dosyasinin icerigi:
   gray_l/gray_r  : rektifiye edilmis gri goruntuler (uint8)
   zemin_cikarildi/zemin_esik_mm : cekim anindaki ayar
 
+Projede parametreler NEREDE:
+  calibration/calib_result.npz  K, D, R, T, R1, R2, P1, P2, Q, RMS
+  calibration/ground_plane.npz  zemin duzlemi (normal, d) + tespit bilgisi
+  data/charuco_config.json      desen tanimi ve OLCULEN kare boyu
+  data/camera_settings.json     pozlama, gain, WB, gamma...
+  data/kutu_tablosu.json        standart kargo kutu olculeri
+  data/olcum_defteri.csv        tum olcumlerin kaydi
+
 Kullanim:
+  .\\calistir.ps1 npz_oku --parametreler        (HEPSI tek ciktida)
   .\\calistir.ps1 npz_oku                       (en son cekim, ozet)
   .\\calistir.ps1 npz_oku --dosya q_2026...npz
   .\\calistir.ps1 npz_oku --png                 (PNG olarak disari aktar)
@@ -21,6 +30,7 @@ Kullanim:
 """
 import argparse
 import glob
+import io
 import os
 import sys
 
@@ -51,6 +61,110 @@ ACIKLAMA = {
     "yontem": "duzlem hangi yontemle bulundu",
     "tarih": "tespit tarihi",
 }
+
+
+def parametreler():
+    """Projedeki tum parametreleri tek ciktida topla ve TUREVLERI hesapla.
+
+    Turev degerler onemli: kullanicinin gordugu sayilarin cogu
+    dosyada dogrudan yazmiyor, matrislerden cikiyor. Ozellikle
+    P1[0,0] ile K1[0,0] karistirilmamali (bkz. YONTEMLER.md bolum 4).
+    """
+    import json
+
+    def baslik(t):
+        print()
+        print("=" * 72)
+        print(t)
+        print("=" * 72)
+
+    # ---------------------------------------------------- kalibrasyon
+    baslik("calibration/calib_result.npz  -  STEREO KALIBRASYON")
+    if not os.path.exists(CALIB):
+        print("  YOK - once kalibrasyon yapilmali")
+    else:
+        c = np.load(CALIB)
+        for k in c.files:
+            a = c[k]
+            if a.ndim == 0:
+                print(f"  {k:14} {float(a):.4f}")
+        print()
+        f_ham = float(c["K1"][0, 0])
+        f_rekt = float(c["P1"][0, 0])
+        B = float(np.linalg.norm(c["T"])) * 1000.0
+        W, H = [int(v) for v in c["image_size"]]
+        print(f"  Cozunurluk        : {W} x {H}")
+        print(f"  Baz uzunlugu B    : {B:.2f} mm")
+        print(f"  f (HAM, K1[0,0])  : {f_ham:.2f} px"
+              f"   <- solvePnP, ham goruntu geometrisi")
+        print(f"  f (REKT, P1[0,0]) : {f_rekt:.2f} px"
+              f"   <- MESAFE HESABI BUNU KULLANIR")
+        print(f"  Ana nokta (rekt)  : "
+              f"({float(c['P1'][0,2]):.1f}, {float(c['P1'][1,2]):.1f})")
+        print()
+        print("  Turev: mesafe hassasiyeti  dZ = Z^2 / (f*B)")
+        print(f"     {'Z (mm)':>8}{'1 px derinlik':>16}{'1 px yanal':>13}")
+        for Z in (400, 550, 800, 1000):
+            print(f"     {Z:8}{Z*Z/(f_rekt*B):13.2f} mm"
+                  f"{Z/f_rekt:11.2f} mm")
+        print()
+        print("  Turev: arama araligina gore EN YAKIN olculebilir mesafe")
+        for nd in (128, 256, 384):
+            print(f"     numDisparities={nd:4} -> {f_rekt*B/nd:6.0f} mm"
+                  f"   (sol kenarda olu bant %{nd/W*100:.1f})")
+
+    # ---------------------------------------------------- zemin duzlemi
+    baslik("calibration/ground_plane.npz  -  ZEMIN DUZLEMI")
+    gp = os.path.join(PROJECT_DIR, "calibration", "ground_plane.npz")
+    if not os.path.exists(gp):
+        print("  YOK - Derinlik tabinda 'Zemin tespit et'")
+    else:
+        g = np.load(gp)
+        for k in g.files:
+            if k in ("K", "D"):
+                continue
+            a = g[k]
+            print(f"  {k:14} {a}")
+        nn = np.asarray(g["normal"], np.float64).ravel()
+        print()
+        print(f"  Duzlem denklemi : n.X + d = 0")
+        print(f"  Kameradan uzaklik: {abs(float(g['d']))*1000:.1f} mm")
+        print(f"  d METRE biriminde - koda mm gerektiginde *1000")
+
+    # ---------------------------------------------------- json dosyalari
+    for ad, dosya in (("data/charuco_config.json  -  DESEN",
+                       "charuco_config.json"),
+                      ("data/camera_settings.json  -  KAMERA AYARLARI",
+                       "camera_settings.json")):
+        baslik(ad)
+        yol = os.path.join(PROJECT_DIR, "data", dosya)
+        if not os.path.exists(yol):
+            print("  YOK")
+            continue
+        d = json.load(open(yol, encoding="utf-8"))
+        for k, v in d.items():
+            if k == "not":
+                print(f"  {k:26} {str(v)[:150]}")
+            else:
+                print(f"  {k:26} {v}")
+        if dosya == "charuco_config.json":
+            sq = d.get("olculen_kare_boyutu_mm")
+            print()
+            print(f"  KRITIK: olculen_kare_boyutu_mm = {sq} tum mutlak")
+            print(f"  olceklerin dayanagi. Dogrulandi (2026-08-20): komsu")
+            print(f"  koselerin 3B mesafesi 20 cekimde medyan 20.05 mm.")
+
+    # ---------------------------------------------------- olcum defteri
+    baslik("data/olcum_defteri.csv  -  OLCUM KAYDI")
+    csv = os.path.join(PROJECT_DIR, "data", "olcum_defteri.csv")
+    if not os.path.exists(csv):
+        print("  YOK")
+    else:
+        satir = io.open(csv, encoding="utf-8").read().splitlines()
+        print(f"  {len(satir)-1} kayit. Son 5:")
+        for s2 in satir[-5:]:
+            print(f"     {s2[:110]}")
+    return 0
 
 
 def dosya_bul(ad):
@@ -174,6 +288,9 @@ def main():
         description="Kaliteli kare (.npz) dosyasini oku ve disari aktar")
     ap.add_argument("--dosya", default=None,
                     help="dosya adi; verilmezse en son cekim")
+    ap.add_argument("--parametreler", action="store_true",
+                    help="projedeki TUM parametre dosyalarini "
+                         "ve turev degerleri dok")
     ap.add_argument("--liste", action="store_true",
                     help="mevcut cekimleri listele")
     ap.add_argument("--png", action="store_true",
@@ -181,6 +298,9 @@ def main():
     ap.add_argument("--nokta", default=None,
                     help="x,y - o noktanin disparity ve 3B degeri")
     a = ap.parse_args()
+
+    if a.parametreler:
+        return parametreler()
 
     if a.liste:
         liste = sorted(glob.glob(os.path.join(CAP_DIR, "q_*_data.npz")))

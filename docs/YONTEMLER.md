@@ -144,13 +144,17 @@ T, Q ve `reprojectImageTo3D` ciktisi metre. UI'da `* 1000` ile mm.
 
 | Deger | Kaynak | Nerede |
 |---|---|---|
-| 1291.8 px | `K1[0,0]` — ham intrinsik | `solvePnP`, ham goruntu geometrisi |
-| **1420.04 px** | `P1[0,0]` — rektifiye projeksiyon | **Mesafe/deltaZ hesabi** |
+| 1288.28 px | `K1[0,0]` — ham intrinsik | `solvePnP`, ham goruntu geometrisi |
+| **1418.18 px** | `P1[0,0]` — rektifiye projeksiyon | **Mesafe/deltaZ hesabi** |
+
+(Guncel degerler `npz_oku --parametreler` ile okunur; yukaridakiler
+2026-08-18 kalibrasyonundan. Yeniden kalibre edilince degisirler —
+belgedeki sayiya degil dosyadaki degere guven.)
 
 Disparity rektifiye goruntude olculdugu icin `Z = f*B/d` ve
 `dZ = Z^2*dd/(f*B)` formullerinde **P1[0,0]** kullanilir.
 
-**Kalite olcutu — RMS DEGIL:** RMS 0.7407 px (limit: cozunurlukle
+**Kalite olcutu — RMS DEGIL:** RMS 0.8340 px (sol 0.7703, sag 0.7682) (limit: cozunurlukle
 olcekli `0.4 x 2048/960 = 0.853`). Ama asil olcut **epipolar hata**:
 44 cift / 3264 kose uzerinde **0.420 px**. Kare atarak RMS
 dusuruluyor ama epipolar hata **kotulesiyor** — RMS tek basina
