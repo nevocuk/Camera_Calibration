@@ -1501,23 +1501,30 @@ class CameraApp:
               "kadari duzlemin uzerinde kaliyor.\n\n"
               "Bir GORUNTULEME modu degil, OLCUM aracidir - acikken "
               "haritanin buyuk kismi silinir. Olcum yapacaginda ac.")
-        IP_ESIK = ("Duzlem OTELEMESI (mm) - boyut filtresi DEGIL.\n\n"
-                   "Kesme duzlemi masadan bu kadar yukari tasinir ve "
-                   "ALTINDA kalan her sey silinir. Cisim masada durdugu "
-                   "icin CISMIN ALT BU KADARI DA GIDER. Bu bir hata degil, "
-                   "tanimin kendisi.\n\n"
-                   "Kaybi 'zemin haritasi' secenegi olcup geri ekler "
-                   "(taban geri kazanimi).\n\n"
-                   "Buyuk deger secmek zorunda kaliyorsan muhtemelen "
-                   "duzlem kaymistir - 'Zemin tespit et' uyari veriyor mu "
-                   "bak. Olculdu: tahta masadan 53 mm yuksekte tespit "
-                   "edilince sahnenin %69 kadari silindi.")
+        IP_ESIK = ("Kesme duzleminin OTELEMESI (mm) - boyut filtresi "
+                   "DEGIL. NEGATIF olabilir.\n\n"
+                   "Kesme duzlemi, tespit edilen duzlemden bu kadar "
+                   "otelenir ve altinda kalan her sey silinir.\n\n"
+                   "POZITIF: duzlem yukari cikar. Cisim masada durdugu "
+                   "icin CISMIN ALT BU KADARI DA GIDER - hata degil, "
+                   "tanimin kendisi. Kaybi 'zemin haritasi' secenegi "
+                   "olcup geri ekler (taban geri kazanimi).\n\n"
+                   "NEGATIF: duzlem asagi iner. Iki gercek sebep var:\n"
+                   "  1) Tahtanin KALINLIGI - tespit edilen duzlem masa "
+                   "degil tahtanin UST yuzeyidir. Tahtayi kaldirip cismi "
+                   "koydugunda cismin tabani duzlemin ALTINDA kalir.\n"
+                   "  2) solvePnP pozunun sapmasi (olculdu: 30-53 mm).\n\n"
+                   "Ayar yontemi: masayi bos birak, zemin cikarmayi ac, "
+                   "esigi masa TAM kaybolana kadar ayarla. Cismi sonra "
+                   "koy.\n\n"
+                   "Buyuk pozitif deger secmek zorunda kaliyorsan duzlem "
+                   "kaymistir - 'Zemin tespit et' uyari veriyor mu bak.")
         lbl_es = tk.Label(zem_row, text="esik (mm):", bg=CARD, fg=MUTED,
                           font=("Segoe UI", 8))
         lbl_es.pack(side=tk.LEFT, padx=(10, 2))
         ipucu(lbl_es, IP_ESIK)
         self.ground_th_var = tk.IntVar(value=12)
-        sp_es = tk.Spinbox(zem_row, from_=3, to=100, width=4,
+        sp_es = tk.Spinbox(zem_row, from_=-60, to=100, width=4,
                            textvariable=self.ground_th_var, bg=INPUT_BG,
                            fg=YELLOW, font=("Consolas", 9), relief="flat",
                            buttonbackground=BORDER)
@@ -3451,7 +3458,13 @@ class CameraApp:
             n = n / max(float(np.linalg.norm(n)), 1e-9)
             pts = cv2.reprojectImageTo3D(dsp, self.calib_data["Q"])
             h = pts @ n + d              # metre
-            esik = max(self.ground_th_var.get(), 1) / 1000.0
+            # NEGATIF deger serbest: kesme duzlemini duzlemin ALTINA
+            # indirir. Gerekli, cunku (a) tahtanin kendi kalinligi var -
+            # tespit edilen duzlem masa degil TAHTANIN UST YUZEYIDIR,
+            # (b) solvePnP pozu birkac on mm sapabiliyor. Ikisi de
+            # cismin tabanini duzlemin ALTINDA birakir ve pozitif esik
+            # cismin altini keser.
+            esik = float(self.ground_th_var.get()) / 1000.0
             cisim = (dsp > 0) & (h >= esik)
             if self.ground_clean_var.get():
                 cisim = self._clean_object_mask(cisim)
@@ -4146,7 +4159,7 @@ class CameraApp:
                     disparity=dsp,             # gosterilen (zemin cikarilmis)
                     disparity_ham=dsp_olcum,   # cikarma ONCESI
                     zemin_cikarildi=bool(self.ground_var.get()),
-                    zemin_esik_mm=int(self.ground_th_var.get()),
+                    zemin_esik_mm=float(self.ground_th_var.get()),
                     raw_mask=self._q_raw_mask,   # WLS oncesi gercek eslesme
                     gray_l=gray_l, gray_r=gray_r)
 
@@ -4677,7 +4690,7 @@ class CameraApp:
             duzlem = gec & (np.abs(h) < 15)
             z_masa = float(np.median(Zmm[duzlem])) if duzlem.sum() > 5000 \
                 else float(np.median(Zmm[gec]))
-            esik = max(self.ground_th_var.get(), 1)
+            esik = float(self.ground_th_var.get())   # negatif olabilir
             m = ((h >= esik) & (h <= 400) & gec
                  & (Zmm < z_masa + 150)).astype(np.uint8)
             m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(
