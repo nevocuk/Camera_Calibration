@@ -1169,6 +1169,44 @@ yandan bakista hata %0.9-2.7 ve tolerans yayilimi 0.0-0.7 mm,
 tepeden bakista yayilim 39-87 mm - yani sonuc tolerans secimine
 bagli hale geliyor ve tek bir sayi olarak raporlanamaz.
 
+
+### RAPOR DEVIR DOSYASI (2026-08-20)
+
+`docs/RAPOR_DEVIR_COWORK.md` yazildi - Cowork'un Ek-4 raporunu
+yazabilmesi icin gereken her sey tek dosyada. Rapor DEGIL, rapor
+girdisi.
+
+Ornek rapor (`docs/ornek_staj_raporu.pdf`, 22 sayfa) incelendi.
+Yapisi: Giris / Kurum ve Amac / Proje Kapsami / Gunluk Calismalar
+(gun gun, her gun bir-iki gorsel) / Sonuc ve Kazanimlar / Kaynaklar.
+
+Devir dosyasinin farki: ornek rapor "sunu yaptim" anlatiyor,
+bizimkinde HER GUN BOLUMUNDE ne bekledigimiz, ne ciktigi ve nedeni
+var. Basarisiz denemeler gizlenmiyor, ayri baslikla anlatiliyor.
+
+Icerik: 10 gun bolumu (A-J), her biri olculen sayilarla
+   A kurulum ve pozlama siniri (-5..-3 bandi)
+   B kamera dengesizligi: uc yanlis teshis, gercek neden 3 yazilmayan
+     ozellik (2.7x fark -> 1.00x)
+   C RMS yanilgisi (kare atinca RMS duser, epipolar hata ARTAR)
+   D sezgiye ters uc olcum (CLAHE bozuyor, yatay yapi kotu, golge
+     zararsiz ama yansima 2.44x zararli)
+   E bes segmentasyon yontemi, engellerin yapisal siniri
+   F sayisal yakinlik dogrulama DEGIL - masa kenari olayi
+   G ChArUco'nun periyodik deseni stereo eslemeyi bozuyor
+   H kare olcusunun dairesel olmayan dogrulamasi (20.05 vs 20.00)
+   I asil bulgu: geometri belirleyici (yayilim 0.1 mm vs 87 mm)
+   J gurultu 1.15 mm ama hata 30-60 mm - darbogaz segmentasyon
+
+Ayrica: ana sonuc tablosu, YAPILAMAYANLAR tablosu (fiziksel kutu,
+cok cisimli tablo, tekrarlanabilirlik, zemin duzlemi kararliligi),
+alti metodolojik kazanim, gorsel listesi (19 dosya yolu dogrulandi),
+veri dosyalari ve yazim notlari.
+
+KURAL kayda gecti: YAPILAMAYANLAR tablosu kucultulmeyecek. Staj
+raporunda sinirlarin acikca yazilmasi, olmayan sonucu var
+gostermekten degerlidir.
+
 ---
 
 ## Yapilacaklar / Sonraki Adimlar

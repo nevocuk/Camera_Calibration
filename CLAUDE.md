@@ -62,3 +62,7 @@ Ilk gunden tutulmaya baslanacak.
 - **Claude Code**: Kamera, kalibrasyon, olcum — donanima dokunan her sey
 - **Cowork**: Rapor (docx), grafik, sema, kesim sablonu — donanim gerektirmeyen isler
 - Iletisim kanali: dosyalar (PROJE_BRIEF.md, data/*.csv, calibration/*.npz)
+- **Rapor devri:** `docs/RAPOR_DEVIR_COWORK.md` — gun gun icerik,
+  olculen sayilar, gorsel listesi ve YAPILAMAYANLAR. Cowork raporu
+  bu dosyadan yazar; sayilari elle kopyalamaz, `output/reports/`
+  altindaki CSV'lerden alir.
