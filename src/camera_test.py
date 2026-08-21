@@ -1978,6 +1978,11 @@ class CameraApp:
         ipucu(sp_ws, IP_WS)
         soru(btn_row2, IP_WS).pack(side=tk.LEFT, padx=(2, 0))
         btn_row2 = _grup("Secenekler ve cikti")
+        tk.Button(btn_row2, text="Kurulum kontrolu",
+                  command=self._kurulum_kontrolu,
+                  bg="#1a5276", fg="white", font=("Segoe UI", 9),
+                  relief="flat", padx=8, pady=2,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(0, 8))
         tk.Button(btn_row2, text="Onerilen ayarlar",
                   command=self._onerilen_olcum_ayarlari,
                   bg="#2d5a3d", fg="white", font=("Segoe UI", 9),
@@ -4655,6 +4660,82 @@ class CameraApp:
         if r >= 0.60 * uzun_kenar:          # duz yuzey, dev yaricap
             return False, None
         return (kal / r) < 0.06, 2.0 * r
+
+    def _kurulum_kontrolu(self):
+        """Kamera geometrisi olcum icin uygun mu? ChArUco GEREKMEZ.
+
+        Olculdu (2026-08-20) - sahnenin baskin duzleminin normali ile
+        optik eksen arasindaki aci bakisi tereddutsuz ayirt ediyor:
+
+           YANDAN bakis : 75.0 / 80.5 / 78.4 derece
+           TEPEDEN bakis: 16.4 / 20.8 / 28.6 / 24.7 derece
+
+        Arada 46 derecelik bosluk var; esik 55 derece guvenli.
+
+        Neden onemli: ayni kod ve ayni ayarlarla, termos (250 x 72 mm)
+           yandan, 610-625 mm -> 252-257 mm, tol yayilimi 0.0-0.7 mm
+           tepeden, 561 mm    -> 270.9 / 290.5 / 310.1  (39 mm)
+           tepeden, 718 mm    -> 177.8 / 204.7 / 264.6  (87 mm)
+        Yani kotu geometride sonuc TOLERANS SECIMINE bagli hale
+        geliyor - tek bir sayi olarak raporlanamaz.
+        """
+        try:
+            dsp = getattr(self, "_pre_ground_dsp", None)
+            if dsp is None:
+                dsp = getattr(self, "_current_dsp", None)
+            if dsp is None:
+                with self._depth_lock:
+                    dsp = getattr(self, "_depth_olcum", None)
+            if dsp is None or self.calib_data is None:
+                self.lbl_meas_status.config(
+                    text="Once derinligi ac ya da [F] ile kaliteli kare al.",
+                    fg=YELLOW)
+                return
+            pts = cv2.reprojectImageTo3D(
+                dsp.astype(np.float32), self.calib_data["Q"]) * 1000.0
+            gec = (dsp > 0) & np.isfinite(pts).all(axis=2)
+            if gec.sum() < 20000:
+                self.lbl_meas_status.config(
+                    text="Yeterli derinlik yok.", fg=YELLOW)
+                return
+            sn, sd, oran = self._sahne_duzlemi(pts, gec)
+            if sn is None:
+                self.lbl_meas_status.config(
+                    text="Sahnede duzlem bulunamadi.", fg=YELLOW)
+                return
+            aci = float(np.degrees(np.arccos(
+                np.clip(abs(float(sn[2])), 0.0, 1.0))))
+            # olcum mesafesi: tiklanan nokta yoksa merkez
+            if self._click_point is not None:
+                sy, sx = self._click_point
+            else:
+                sy, sx = dsp.shape[0] // 2, dsp.shape[1] // 2
+            Z = (float(pts[int(sy), int(sx), 2])
+                 if gec[int(sy), int(sx)] else float("nan"))
+
+            sorun = []
+            if aci < 55.0:
+                sorun.append(f"TEPEDEN bakiyorsun ({aci:.0f} derece). "
+                             "Kamerayi cisme YANDAN bakacak sekilde "
+                             "cevir - olculdu, yandan bakista sonuc "
+                             "tolerans ayarindan bagimsiz cikiyor.")
+            if np.isfinite(Z) and not (500 <= Z <= 680):
+                sorun.append(f"mesafe {Z:.0f} mm - onerilen bant "
+                             "550-650 mm. Derinlik hassasiyeti "
+                             "mesafenin karesiyle kotulesir.")
+            if sorun:
+                self.lbl_meas_status.config(
+                    text="KURULUM UYGUN DEGIL: " + "  ".join(sorun),
+                    fg=RED)
+            else:
+                self.lbl_meas_status.config(
+                    text=(f"KURULUM IYI: duzlem acisi {aci:.0f} derece "
+                          f"(yandan), mesafe {Z:.0f} mm. Bu bantta "
+                          f"olculen hata %0.9-2.7 ve tolerans yayilimi "
+                          f"0.0-0.7 mm."), fg=GREEN)
+        except Exception as ex:
+            self.lbl_meas_status.config(
+                text=f"Kurulum kontrolu hatasi: {ex}", fg=RED)
 
     def _onerilen_olcum_ayarlari(self):
         """Olcum ayarlarini OLCULEN en iyi degerlere dondur.

@@ -1139,6 +1139,36 @@ tepeden olcumlerde sarmıyor.
 | 5.9 Ana sonuc tablosu | KISMEN - 1 cisim, 5 gerek |
 | 5.10 Fiziksel dogrulama | YOK |
 
+
+### KURULUM KONTROLU - uygulama artik geometriyi kendisi denetliyor (2026-08-20)
+
+Olcum tabina "Kurulum kontrolu" butonu eklendi. ChArUco GEREKMEZ;
+sahnenin baskin duzlemi canli derinlikten RANSAC ile bulunup
+normali ile optik eksen arasindaki aciya bakiliyor.
+
+**Sinyal olculdu, tereddutsuz ayiriyor:**
+
+| Cekim | Gercek bakis | Olculen duzlem acisi |
+|---|---|---|
+| 170641 | yandan | 75.0 derece |
+| 172145 | yandan | 80.5 derece |
+| 172354 | yandan | 78.4 derece |
+| 093039 | tepeden | 16.4 derece |
+| 110729 | tepeden | 20.8 derece |
+| 141234 | tepeden | 28.6 derece |
+| 144837 | tepeden | 24.7 derece |
+
+Arada **46 derecelik** bosluk var; esik 55 derece secildi.
+Ikinci kontrol mesafe: onerilen bant 500-680 mm.
+
+**Dogrulama:** bes gercek cekimde 5/5 dogru karar
+(`yandan -> IYI`, `tepeden -> UYGUN DEGIL`).
+
+Butonun soyledigi sey olculmus bir gercek: ayni kod ve ayarlarla
+yandan bakista hata %0.9-2.7 ve tolerans yayilimi 0.0-0.7 mm,
+tepeden bakista yayilim 39-87 mm - yani sonuc tolerans secimine
+bagli hale geliyor ve tek bir sayi olarak raporlanamaz.
+
 ---
 
 ## Yapilacaklar / Sonraki Adimlar
