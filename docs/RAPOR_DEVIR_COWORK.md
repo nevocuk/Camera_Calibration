@@ -80,25 +80,138 @@ Yakalama -> Rektifikasyon -> On-isleme -> SGBM+WLS -> Temizleme
 
 ## 2. GUN GUN ICERIK (rapor bolum 4)
 
-> Cowork: her gun icin verilen baslik + anlatilacak icerik + sayilar
-> + gorsel dosyasi asagida. Anlatimi akici Turkce paragraflara cevir,
-> madde madde birakma. Gun numaralari diger projeyle birlestirilirken
-> yeniden numaralandirilacak.
+> **Cowork: iki alternatif kurgu var. A tavsiye edilen.**
+> Hangisini secersen sec, icerik ayni; degisen sey sira ve baslik.
+
+### KURGU A — KRONOLOJIK (ornek rapordaki gibi) — TAVSIYE EDILEN
+
+Ornek rapor gun gun ilerliyor ve **ihtiyac analizi + planlama** ile
+basliyor. Bizde de o asama gercekten yasandi (donanim eline gecmeden
+once teorik calisma zarfi hesaplandi), o yuzden ayni sirayi
+izleyebiliriz. Okuyucu projeyi bastan kurulusuyla goruyor.
+
+| Gun | Baslik |
+|---|---|
+| 1 | Ihtiyac analizi, gizlilik kisiti ve bagimsiz prototip karari |
+| 2 | Teorik sistem planlamasi — calisma zarfinin hesaplanmasi |
+| 3 | Donanim kurulumu ve kamera test aracinin gelistirilmesi |
+| 4 | Iki kamera arasindaki dengesizlik: uc yanlis teshis |
+| 5 | Stereo kalibrasyon ve "RMS iyi ise kalibrasyon iyidir" yanilgisi |
+| 6 | Derinlik haritasi: sezgiye ters cikan uc olcum |
+| 7 | Nesne olcum hattinin kurulmasi ve segmentasyon denemeleri |
+| 8 | Dogrulama yonteminin degistirilmesi — sayidan gorsele |
+| 9 | Kalibrasyon deseninin kendisinin hata kaynagi olmasi |
+| 10 | Olcek dogrulamasi ve asil bulgu: geometrinin belirleyiciligi |
+
+### KURGU B — KONU BAZLI (alternatif)
+
+Gun sirasi yerine alt sisteme gore gruplamak. Avantaji: teknik
+butunluk daha net. Dezavantaji: ornek rapordan uzaklasir ve "gunluk
+staj calismalari" basligina tam oturmaz.
+
+| Bolum | Icerik |
+|---|---|
+| 4.1 | Planlama ve teorik tasarim |
+| 4.2 | Donanim karakterizasyonu ve kamera esitleme |
+| 4.3 | Kalibrasyon ve dogruluk olcutleri |
+| 4.4 | Derinlik haritasi uretimi ve on-isleme |
+| 4.5 | Nesne segmentasyonu ve boyut cikarma |
+| 4.6 | Dogrulama metodolojisi |
+| 4.7 | Sistem sinirlarinin belirlenmesi |
 
 ---
 
-### GUN A — Sistem kurulumu ve kamera karakterizasyonu
-*(2026-08-13/14)*
+> Asagidaki icerik **Kurgu A**'ya gore siralandi. Kurgu B secilirse
+> ayni bloklar yukaridaki basliklara dagitilir.
 
-**Yapilan:** Iki kameranin ayni anda 2048x1536'da calistirilmasi,
-backend secimi, ilk kalibrasyon denemeleri.
+---
 
-**Karsilasilan sorun — backend:** DSHOW arayuzunde bazi kamera
-ayarlari (beyaz dengesi, pozlama) iki kamerada tutarsiz
-uygulaniyordu. MSMF'ye gecildi.
+### GUN 1 — Ihtiyac analizi, gizlilik kisiti ve bagimsiz prototip karari
 
-**Olculen — pozlama siniri:** Pozlama degerleri tarandi ve gercek
-kare parlakligi olculdu:
+**Baglam:** Stajin yurutuldugu kurumda gizlilik sozlesmesi var; sirket
+kodu ve verisi raporda kullanilamiyor. Bolumun staj bilgilendirmesinde
+bu durum icin oneri var: ogrenci **kendi donanimi ve verisiyle**
+ayni teknik yetkinligi gosteren bagimsiz bir prototip gelistirebilir.
+
+Bu dogrultuda, ayni goruntu isleme yetkinligini gosterecek bagimsiz
+bir problem secildi: **iki kamerayla bir cismin 3B boyutlarini olcmek
+ve uygun kargo kutusunu onermek.**
+
+**Sistem iki bacakli kurgulandi:**
+1. Olcum hatti — kalibrasyon, derinlik haritasi, boyut cikarma
+2. Cikti hatti — standart kutu esleme, desi hesabi, kesim yonergesi
+
+**Bu gunun asil kazanimi:** Bir problemi cozmeye baslamadan once
+**neyin dogrulanabilir olacagina** karar vermek. Projenin en basinda
+"her adim bagimsiz bir olcumle sinanacak" kurali konuldu; rapordaki
+sayilarin tamami bu kurala dayaniyor.
+
+*Gorsel onerisi:* sistem akis semasi
+(`output/reports/sekil1_akis_semasi.png`)
+
+---
+
+### GUN 2 — Teorik sistem planlamasi: calisma zarfinin hesaplanmasi
+
+**Yapilan:** Donanim kurulmadan once, stereo geometrinin temel
+bagintilariyla sistemin **nerede calisabilecegi** hesaplandi. Amac,
+deneme-yanilmayla zaman kaybetmek yerine beklentiyi onceden
+sayilastirmakti.
+
+**Kullanilan bagintilar:**
+
+```
+Z = f · B / d                 (mesafe)
+ΔZ = Z² · Δd / (f · B)        (derinlik belirsizligi)
+```
+
+`Z` mesafe, `f` odak uzakligi (piksel), `B` iki kamera arasi
+uzaklik (baz), `d` disparity.
+
+**Kritik cikarim:** Derinlik belirsizligi mesafenin **karesiyle**
+buyuyor. Yani sistemi 2 kat uzaga kurmak hatayi 2 degil **4 kat**
+artiriyor.
+
+**Hesaplanan calisma zarfi** (planlama degerleriyle: f ≈ 914 px,
+B = 60 mm):
+
+| Mesafe | Derinlik belirsizligi | Durum |
+|---|---|---|
+| 250 mm | 0.57 mm | Cisim goruse sigmiyor |
+| 350 mm | 1.12 mm | Uygun |
+| **450 mm** | **1.85 mm** | **Uygun** |
+| 550 mm | 2.76 mm | Uygun |
+| 700 mm | 4.47 mm | Dogruluk yetersiz |
+| 1000 mm | 9.11 mm | Dogruluk yetersiz |
+
+**Sonuc:** Calisma bandi **350–550 mm** olarak planlandi. Bu tahmin
+projenin sonunda gercek olcumlerle karsilastirilacak (bkz. Gun 10) —
+teorinin ne kadar tuttugu raporun dogrulama bolumunun bir parcasi.
+
+**Ogrenilen:** Bir sistemin sinirini olcmeden once **hesaplayabilmek**,
+hangi denemenin anlamli oldugunu bastan belirliyor.
+
+---
+
+### GUN 3 — Donanim kurulumu ve kamera test aracinin gelistirilmesi
+
+**Yapilan:** Iki USB kamera modulu 3B basilmis govdeye sabitlendi.
+Ikisini ayni anda yonetebilmek icin Python/Tkinter tabanli bir test
+araci yazildi: es zamanli goruntu yakalama, manuel pozlama/gain/beyaz
+dengesi kilitleme, netlik skoru, kalibrasyon karesi toplama.
+
+**Neden ayri bir arac:** Stereo calismada iki kameranin **ayni anda**
+kare vermesi sart. Kameralari sirayla okumak aralarina kod cozme
+suresi koyuyor; cisim ya da kamera hareket ederse disparity kayiyor.
+Bu yuzden once ikisine "kareyi yakala" (`grab`), sonra "kareyi coz"
+(`retrieve`) denmesi gerekiyor.
+
+**Karsilasilan sorun — surucu arayuzu:** Ilk secilen DSHOW arayuzunde
+bazi kamera ayarlari (beyaz dengesi, pozlama) iki kamerada tutarsiz
+uygulaniyordu. MSMF arayuzune gecildi.
+
+**Olculen — kullanilabilir pozlama bandi:** Pozlama degerleri tarandi
+ve her degerde **gercek kare parlakligi** olculdu:
 
 | Pozlama | SOL / SAG parlaklik | Durum |
 |---|---|---|
@@ -107,33 +220,33 @@ kare parlakligi olculdu:
 | **−5** | **104 / 150** | Kullanilabilir |
 | −7 | 15 / 6 | Cok karanlik |
 
-**Ogrenilen:** Doymus goruntude doku kalmadigi icin SGBM eslesme
-yapamiyor. Kullanilabilir bant −5 … −3.
+**Ogrenilen:** Asiri parlak (doymus) goruntude piksel degerleri
+tavana yapisip **doku kayboluyor**; esleme algoritmasi tutunacak
+yapi bulamiyor. "Aydinlik goruntu iyi goruntudur" varsayimi stereo
+icin gecerli degil.
 
-*Gorsel:* `patterns/charuco_board.png` (kalibrasyon deseni)
+*Gorsel onerisi:* uygulama arayuzu ekran goruntusu (Nevfel alacak)
 
 ---
 
-### GUN B — Kamera dengesizligi: uc yanlis teshis ve gercek neden
-*(2026-08-17)*
+### GUN 4 — Iki kamera arasindaki dengesizlik: uc yanlis teshis
 
-**Bu gunun tamami bir hata avina gitti ve raporun en ogretici
-bolumu olmali.**
+**Bu gun bir hata avina gitti ve raporun en ogretici bolumlerinden.**
 
-**Belirti:** Iki kamera ayni sahneye bakarken belirgin farkli
-goruntu veriyordu (parlaklik orani 2.7x). Bu, stereo eslemeyi
-dogrudan bozuyor.
+**Belirti:** Iki kamera ayni sahneye bakarken belirgin farkli goruntu
+veriyordu — parlaklik orani **2.7 kat**. Stereo esleme iki goruntunun
+benzer olmasina dayandigi icin bu dogrudan olcumu bozuyor.
 
-**Sirayla suclanan ve YANLIS cikan nedenler:**
-1. Lens diyafram farki
+**Sirayla suclanan ve olcumle YANLIS cikan nedenler:**
+1. Lens diyaframlarinin farkli olmasi
 2. Sensorlerin duyarlilik farki
-3. Koruyucu film / uretim toleransi
+3. Lenslerden birinde koruyucu film kalmis olmasi
 
-**Gercek neden:** Kamera ayarlarini yazan fonksiyon 11 ozellikten
-yalnizca 8'ini yaziyordu; **GAMMA, HUE ve BACKLIGHT hic
-yazilmiyordu**. Bu ozellikler kamerada **kalici** saklandigi icin
-gecmiste yazilan degerler oylece kaliyordu (olculdu: GAMMA sol 200,
-sag 100).
+**Gercek neden:** Kamera ayarlarini yazan fonksiyon, 11 ozellikten
+yalnizca 8'ini yaziyordu — **GAMMA, HUE ve BACKLIGHT hic
+yazilmiyordu**. Bu ozellikler kameranin kendi hafizasinda **kalici**
+saklandigi icin gecmiste yazilmis degerler oylece kaliyordu. Olculdu:
+sol kamerada GAMMA 200, sagda 100.
 
 **Kanit — 11 ozelligin tamami ayni degere yazildiginda:**
 
@@ -143,22 +256,29 @@ sag 100).
 | **−4** | **120.0** | **120.5** | **1.00x** |
 | −3 | 170.2 | 173.3 | 1.02x |
 
-2.7x'lik farkin **tamami ayar kaynakliymis**; donanimsal degil.
+2.7 katlik farkin **tamami ayar kaynakliymis**; donanimsal degil.
 
-**Ikinci bulgu — MSMF geri okumasi bozuk:** `cap.get()` ne yazilirsa
-yazilsin ayni degeri donduruyor, ama ayar **gercekte uygulaniyor**
-(kare parlakligi olculunce goruluyor). Bu yuzden koda "ayari geri
-okuyup dogrula" mantigi **yazilmamali**.
+**Ikinci bulgu — ayar geri okumasi guvenilmez:** Surucu arayuzu, hangi
+deger yazilirsa yazilsin geri okumada ayni sayiyi donduruyordu; ama
+ayar **gercekte uygulaniyordu** (kare parlakligi olculunce goruluyor).
+Bu yuzden koda "ayari geri oku ve dogrula" mantigi yazilmadi.
 
-**Ogrenilen:** Bir cihaz ayari geri okunamiyorsa, dogrulama cihazin
-kendi raporundan degil **cikti verisinden** yapilmali.
+**Ogrenilen:** Bir cihazin kendi raporu dogrulama sayilmaz. Dogrulama
+**cihazin urettigi veriden** yapilmali. Ayrica: bir sistemde
+"yazilmayan" bir ayar, sifirlanmis degil **eski degerinde kalmis**
+demektir.
 
 ---
 
-### GUN C — Kalibrasyon ve "RMS iyi ise kalibrasyon iyidir" yanilgisi
-*(2026-08-18)*
+### GUN 5 — Stereo kalibrasyon ve "RMS iyi ise kalibrasyon iyidir" yanilgisi
 
-**Yapilan:** 44 kare cift ile stereo kalibrasyon.
+**Yapilan:** ChArUco deseni (9x13 kare) ile 44 kare cift toplanip
+stereo kalibrasyon yapildi.
+
+**Neden ChArUco:** Duz satranc tahtasinda desen kismen gorunurse
+tespit basarisiz olur. ChArUco'da her kareye bir isaret gomulu
+oldugu icin desenin bir kismi gorunse bile calisir; kose konumlari
+ise satranc kesisimlerinden **alt-piksel** hassasiyetle bulunur.
 
 **Sonuclar:**
 
@@ -166,296 +286,292 @@ kendi raporundan degil **cikti verisinden** yapilmali.
 |---|---|
 | Stereo RMS | 0.8340 px |
 | Tekli RMS (sol / sag) | 0.7703 / 0.7682 px |
-| Baz uzunlugu | 71.79 mm |
-| f (rektifiye, P1[0,0]) | 1418.18 px |
+| Baz uzunlugu (olculdu) | 71.79 mm |
+| Odak uzakligi (rektifiye) | 1418.18 px |
 
-**METODOLOJIK BULGU (raporda one cikarilmali):** RMS'i dusurmek
-icin "kotu" kareler atildi. RMS gercekten dustu — ama **epipolar
-hata kotulesti**. RMS, modelin kendi verisine ne kadar uydugunu
-olcer; kare atmak veriyi kolaylastirir, modeli iyilestirmez.
+**METODOLOJIK BULGU — raporda one cikarilmali:** RMS degerini
+dusurmek icin "kotu" gorunen kareler veri setinden atildi. RMS
+gercekten dustu — **ama epipolar hata kotulesti.**
 
-Gercek kalite olcutu **epipolar hata**: 44 cift / 3264 kose
-uzerinde **0.420 px**.
+RMS, modelin **kendi verisine** ne kadar uydugunu olcer. Veriden
+zor ornekleri atmak, modeli iyilestirmez; yalnizca sinavi
+kolaylastirir.
 
-**Ogrenilen:** Bir uyum olcutunu (RMS) iyilestirmek icin veri
-secmek, olcutun anlamini yok eder. Bagimsiz bir olcut gerekir.
+Gercek kalite olcutu **epipolar hata**: rektifikasyondan sonra ayni
+noktanin iki goruntude ayni satirda cikip cikmadigi. 44 cift / 3264
+kose uzerinde olculdu: **0.420 piksel**.
 
-**Ikinci bulgu — iki farkli odak uzunlugu var ve karistirilmamali:**
+**Ogrenilen:** Bir uyum olcutunu iyilestirmek icin veri secmek, o
+olcutun anlamini yok eder. Bagimsiz bir olcut sart.
+
+**Ikinci bulgu — iki farkli odak uzunlugu var, karistirilmamali:**
 
 | Deger | Kaynak | Nerede kullanilir |
 |---|---|---|
-| 1288.28 px | `K1[0,0]` — ham | solvePnP, ham goruntu |
-| **1418.18 px** | `P1[0,0]` — rektifiye | **Mesafe hesabi** |
+| 1288.28 px | Ham kamera matrisi | Ham goruntu geometrisi |
+| **1418.18 px** | Rektifiye projeksiyon | **Mesafe hesabi** |
 
-Disparity rektifiye goruntude olculdugu icin mesafe formulunde
-`P1[0,0]` kullanilmali.
+Disparity rektifiye edilmis goruntude olculdugu icin mesafe
+formulunde ikincisi kullanilmali. Bu ayrim atlanirsa tum mesafeler
+%9 sapar.
 
-*Gorseller:*
-`output/reports/sekil3_rms_iyilesme.png`,
-`output/reports/sekil4_kose_hata_analizi.png`
+*Gorseller:* `output/reports/sekil3_rms_iyilesme.png`,
+`output/reports/sekil4_kose_hata_analizi.png`,
+`patterns/charuco_board.png`
 
 ---
 
-### GUN D — Derinlik haritasi: sezgiye ters cikan uc olcum
-*(2026-08-18/19)*
+### GUN 6 — Derinlik haritasi: sezgiye ters cikan uc olcum
 
-**1. CLAHE (kontrast artirma) haritayi BOZUYOR**
+Derinlik haritasi SGBM algoritmasi ve WLS filtresiyle uretiliyor.
+Bu asamada uc beklenti olcumle yanlislandi.
 
-Beklenti: kontrast artarsa esleme iyilesir. Olculen (6 gercek
+**1. Kontrast artirmak haritayi BOZUYOR**
+
+Beklenti: kontrast artarsa esleme kolaylasir. Olculen (6 gercek
 stereo cift, ayni veri, farkli on-isleme):
 
-| Konfigurasyon | Ort. sicrama | >2px sicrama |
+| Konfigurasyon | Ortalama sicrama | %2'den buyuk sicrama |
 |---|---|---|
-| **CLAHE yok** | **0.361** | **%1.5** |
+| **Kontrast artirma yok** | **0.361** | **%1.5** |
 | CLAHE 1.0 | 0.399 | %1.9 |
 | CLAHE 2.0 | 0.419 | %2.1 |
 
-Neden: duz/dokusuz yuzeylerde CLAHE'nin yukselttigi sey **sensor
-gurultusu**; SGBM bunu gercek doku sanip sahte eslesme uretiyor.
-CLAHE varsayilan kapatildi.
+Neden: duz ve dokusuz yuzeylerde (duvar, masa) kontrast artirmanin
+yukselttigi sey **sensor gurultusu**. Algoritma bunu gercek doku
+sanip sahte eslesme uretiyor. Ozellik varsayilan olarak kapatildi.
 
 **2. Cismin YONU eslesmeyi belirliyor**
 
-SGBM eslesmeyi yatay tarama satirinda arar. Yatay bir kenar tarama
-satiri boyunca uzanir; yatay kaydirinca goruntu ayni kalir, kayma
-belirlenemez (aperture problem).
+Algoritma eslesmeyi yatay tarama satirinda arar. Yatay bir kenar bu
+satir boyunca uzanir; yatay kaydirinca goruntu ayni kalir ve kayma
+belirlenemez. (Goruntu islemede *aperture problem* olarak bilinir.)
 
 | Bolge | Ham eslesme orani |
 |---|---|
 | Dikey yapili | **%67.1** |
 | Yatay yapili | %51.0 |
 
-Ortalama 1.32x, en keskin karede 3.02x.
+Ortalama 1.32 kat, en keskin karede 3.02 kat fark.
 
 **3. Yansima zararli, GOLGE ZARARSIZ**
 
-Sezgiye ters: golgeden kaciniriz saniriz. Sol-sag tutarlilik
-kontrolu, 6 gercek cift:
+Sezgi golgeden kacinmayi soyler. Olculen tam tersi:
 
-| Bolge | Tutarsizlik | Orta tona gore |
+| Bolge | Sol-sag tutarsizlik | Orta tona gore |
 |---|---|---|
 | Koyu (golge) | %27.1 | 1.12x |
 | **Parlak (yansima)** | **%58.7** | **2.44x** |
 
 Golge yuzeye **yapisiktir** — iki kamera onu ayni fiziksel noktada
-gorur, gecerli dokudur. Yansima **bakis acisina baglidir** — parlak
-leke iki kamerada farkli noktada durur, SGBM lekeyi lekeye
-eslestirip hayalet derinlik uretir.
+gorur, dolayisiyla gecerli bir dokudur ve eslesmeye yardim eder.
+Yansima ise **bakis acisina baglidir** — parlak leke iki kamerada
+farkli fiziksel noktada durur, algoritma lekeyi lekeye eslestirip
+hayalet derinlik uretir.
 
-**4. WLS "dolgulu %" bir kalite olcusu DEGIL**
+**4. Filtrenin "doluluk" orani kalite olcusu DEGIL**
 
-WLS filtresi bosluklari **interpolasyonla** doldurur. Harita %100
-dolu gorunurken buyuk kismi tahmin olabilir. Gercek olcut WLS
-**oncesi** ham eslesme orani; kod bunu ayrica saklıyor.
+WLS filtresi bosluklari **komsulardan tahmin ederek** doldurur.
+Harita %100 dolu gorunurken buyuk kismi tahmin olabilir. Bu yuzden
+kod, filtreden **once** gercekten eslesen piksellerin oranini ayrica
+sakliyor; guvenilirlik degerlendirmesi o sayiya bakiyor.
 
-*Gorsel:* `output/reports/sekil2_teorik_hata_egrisi.png`
+**Ogrenilen:** Bir ciktinin "tam" gorunmesi, dogru oldugu anlamina
+gelmiyor. Ara asamayi saklamak, sonucun ne kadarinin olcum ne
+kadarinin tahmin oldugunu ayirt etmeyi sagliyor.
+
+*Gorsel:* ornek derinlik ciktisi
+(`output/depth_captures/*_derinlik.png` arasindan secilecek)
 
 ---
 
-### GUN E — Olcum: bes segmentasyon yontemi, ucu calisiyor
-*(2026-08-19/20)*
+### GUN 7 — Nesne olcum hattinin kurulmasi ve segmentasyon denemeleri
 
-**Problem:** Tiklanan piksel hangi cisme ait? Derinlik surekliligi
-tek basina cismi masadan ayirmiyor — cismin masaya degdigi yerde
-derinlik **sicramiyor**.
+**Problem:** Kullanici bir noktaya tikliyor; o noktanin ait oldugu
+cismin sinirlari nasil bulunacak?
+
+Ilk yaklasim derinlik surekliligiydi: tiklanan noktadan baslayip
+benzer derinlikteki komsulara yayilmak. **Calismadi** — cunku cismin
+masaya degdigi yerde derinlik **sicramiyor**; bolge kesintisiz masaya
+akiyor.
 
 **Denenen bes yontem:**
 
 | # | Yontem | Sonuc |
 |---|---|---|
-| 1 | Derinlik toleransi | Cisim goruntu duzlemine paralelse calisir |
-| 2 | Parlaklik seviyesi | Kismen — cisme bagimli |
-| 3 | Kenar + basamak engelleri | Kismen — kararlilik katiyor |
-| 4 | Yukseklik kriteri | **Calisiyor** — duzlem gerekir |
-| 5 | Watershed | **Calisiyor** — duzlem gerekmez |
+| 1 | Derinlik toleransi | Cisim goruntu duzlemine paralelse calisiyor |
+| 2 | Parlaklik seviyesi | Kismen — cismin rengine bagimli |
+| 3 | Kenar/basamak engelleri | Kismen — kararlilik katiyor |
+| 4 | Duzlemden yukseklik | **Calisiyor** — zemin duzlemi gerekiyor |
+| 5 | Watershed | **Calisiyor** — zemin duzlemi gerekmiyor |
 
-**Referans olcum** (ayakta sise, tepeden bakis, gercek ~250 x 72 mm):
+**Referans olcum** (ayakta duran sise, tepeden bakis, gercek ~250 mm):
 
-| Yontem | Sonuc |
+| Yontem | Sonuc (uc farkli ayarla) |
 |---|---|
-| Derinlik toleransi (tol 15/30/60) | **65 / 83 / 158 mm** |
-| Yukseklik kriteri (4 farkli ayar) | 248.4 / 247.4 / 247.7 / 247.0 |
-| **Watershed (4 farkli ayar)** | **248.9 / 249.0 / 248.9 / 249.0** |
+| Derinlik toleransi | **65 / 83 / 158 mm** |
+| Duzlemden yukseklik | 248.4 / 247.4 / 247.7 mm |
+| **Watershed** | **248.9 / 249.0 / 248.9 mm** |
 
-**1-3'un yapisal siniri (onemli):** Bir engel bolgeyi **buyutemez,
-yalnizca kucultebilir**. Cisim bakis dogrultusunda uzaniyorsa bolge
-zaten cismin ortasinda durur ve engel hic devreye girmez. Olculdu:
-bolge gercek cismin **%25**'i, durdugu yerdeki derinlik basamagi
-3.91 mm/px (yani kenar YOK), gercek siluette 48.57 mm/px.
+**1-3'un yapisal siniri:** Bir engel bolgeyi **buyutemez, yalnizca
+kucultebilir**. Cisim bakis dogrultusunda uzaniyorsa bolge zaten
+cismin ortasinda duruyor ve engel hic devreye girmiyor. Olculdu:
+bolge gercek cismin **%25**'i; durdugu yerdeki derinlik degisimi
+3.91 mm/piksel (yani orada kenar YOK), gercek cisim sinirinda ise
+48.57 mm/piksel.
 
-**4 ve 5 neden calisiyor:** Yayilmiyorlar. Her piksel sabit bir
-referansa karsi olculur, dolayisiyla ne erken durur ne kacar.
+**4 ve 5 neden calisiyor:** Yayilmiyorlar. Her piksel **sabit bir
+referansa** karsi olculuyor, dolayisiyla bolge ne erken duruyor ne
+de kaciyor.
 
-**Denendi ve calismadi — kenar duvarlarini floodFill'e vermek:**
-Kenar ayrimi cok iyi (siluet |grad I| 108.3 vs cismin ici 5.7 —
-19 kat). Ama duvarla cevrelemek **topolojik** bir sart: duvarin her
-yerde kapali olmasi gerekiyor. Olculdu: siluetin en fazla **%86**'si
-duvar oluyor, kalan %14'un tek pikselinden bolge kaciyor.
+**Ogrenilen:** Yayilarak calisan bir kriterin capasi yoktur; ya erken
+durur ya kacar. Mutlak bir referans, kademeli bir kuraldan daha
+guvenilir.
 
-*Gorseller:*
-`output/reports/basamak_neden_tutmadi.png`,
+*Gorseller:* `output/reports/basamak_neden_tutmadi.png`,
 `output/reports/bolge_nerede_duruyor.png`
 
 ---
 
-### GUN F — Dogrulama yontemi: sayiya degil GORSELE bakmak
-*(2026-08-19)*
+### GUN 8 — Dogrulama yonteminin degistirilmesi: sayidan gorsele
 
 **Bu bolum raporun metodoloji acisindan en degerli kismi.**
 
-**Yasanan hata:** Birden fazla aday bolge denendi ve sonuclar
-termosun **bilinen olculerine yakinliga gore** puanlandi. En iyi
-puanli 234 x 55 x 39 mm secilip "termos olculdu" diye sunuldu.
-**Gercekte olculen sey masa kenariydi.**
+**Yasanan hata:** Birden fazla aday bolge denendi ve sonuclar test
+cisminin **bilinen olculerine yakinliga gore** puanlandi. En iyi
+puanli 234 x 55 x 39 mm secilip "cisim olculdu" diye kaydedildi.
+Sonradan goruldu ki **olculen sey masanin kenariydi** — tesadufen
+benzer sayilar uretmisti.
 
-**Ogrenilen:** Beklenen cevaba yakinlik, dogru seyi olctugunun
-kaniti degildir. Yanlis bir bolge de tesadufen yakin sayi
-uretebilir.
+**Ogrenilen:** Beklenen cevaba yakinlik, **dogru seyi olctugunun
+kaniti degildir.** Yanlis bir bolge de tesadufen makul sayi
+uretebilir. Bu, olcum yapan her sistemde gecerli bir tuzak.
 
-**Alinan onlem:** Her olcum icin olculen 3B kutu **goruntu uzerine
-ciziliyor**. Kutu cismi sariyorsa olcum dogru, cevreye tasiyorsa
-bolge kacmis. Her ana eksenin kenarlari ve sol ustteki olcusu ayni
-renkte (UZUN yesil, ORTA acik mavi, KISA pembe) — hangi sayinin
-hangi kenar oldugu tereddutsuz belli.
+**Alinan onlem:** Her olcum icin hesaplanan 3B kutu **goruntu
+uzerine ciziliyor.** Kutu cismi sariyorsa olcum dogru; cevreye
+tasiyorsa bolge kacmis demektir. Her boyutun kenarlari ve kosedeki
+sayisi ayni renkte (uzun kenar yesil, orta acik mavi, kisa pembe) —
+hangi sayinin hangi kenar oldugu tereddutsuz belli oluyor.
 
-*Gorsel:* `output/reports/rapor_dogrulama_levhasi.png` **(rapora
-mutlaka girmeli)**
+Bu tarihten sonra hicbir olcum yalnizca sayiya bakilarak kabul
+edilmedi.
+
+*Gorsel:* `output/reports/rapor_dogrulama_levhasi.png`
+**(rapora mutlaka girmeli)**
 
 ---
 
-### GUN G — Kalibrasyon deseninin kendisi bir hata kaynagi
-*(2026-08-20)*
+### GUN 9 — Kalibrasyon deseninin kendisinin hata kaynagi olmasi
 
-**Belirti:** Zemin duzlemi tespiti, tum metrikler temiz gorunmesine
-ragmen gercek masadan 30-53 mm sapiyordu (96 kose, izdusum hatasi
-0.34 px, bakis acisi 28.6 derece — hepsi iyi).
+**Belirti:** Zemin duzlemi tespiti, tum gostergeler temiz gorunmesine
+ragmen gercek masa yuzeyinden 30–53 mm sapiyordu. Tespit metrikleri
+iyiydi: 96 kose bulunmus, yeniden izdusum hatasi 0.34 piksel.
 
-**Once yanlis teshis:** solvePnP'nin duz hedefteki poz belirsizligi
-suclandi. **23 kayitli cekimde olculup curutuldu**: duzlemi
-solvePnP yerine tahtanin stereo derinliginden uydurmak ayni sonucu
-veriyor (medyan fark 3.4 mm / 0.60 derece).
+**Once yanlis teshis:** Duz bir hedefte poz cozumunun iki matematiksel
+karsiliginin olmasi (planar pose ambiguity) suclandi. **23 kayitli
+cekim uzerinde olculup curutuldu** — duzlemi bu yontem yerine
+tahtanin stereo derinliginden hesaplamak ayni sonucu veriyor
+(medyan fark 3.4 mm / 0.60 derece).
 
-**Gercek neden:** Tahta masaya duz yatiyor (olculdu: tahta ile
-cevre masa duzlemleri arasi aci 0.22 derece, kalinlik 2.1 mm). Ama
-tahtanin **uzerindeki derinlik** bozuk:
+**Gercek neden:** Tahta masaya duz yatiyor (olculdu: tahta ile cevre
+masa duzlemleri arasinda 0.22 derece, kalinlik 2.1 mm). Sorun
+tahtanin **uzerindeki derinlik olcumunde**:
 
 | | Bu cekim | Saglikli cekim |
 |---|---|---|
 | Tahtada mesafe dagilimi | **410 – 656 mm** | ~25 mm |
 | Disparity salinimi | **37.4 px** | 8.9 px |
-| Olculen kare boyu | 21.68 mm | 20.0 mm |
+| Hesaplanan kare boyu | 21.68 mm | 20.0 mm |
 
 Duz bir tahtanin mesafesi 250 mm'lik bir aralikta saçilamaz.
-**ChArUco periyodik bir desendir**; blok esleme bazi bloklarda
-yanlis kareye kilitleniyor. Cevredeki duz beyaz masa temiz
-olculuyor (kalinti 1.64 mm) — sorun yuzeyde degil desenin
-periyodikliginde.
+**ChArUco periyodik bir desendir** — birbirinin ayni kareler
+tekrarliyor. Blok esleme bazi bolgelerde **yanlis kareye
+kilitleniyor.** Cevredeki duz beyaz masa temiz olculuyor (sapma
+1.64 mm), yani sorun yuzeyde degil desenin tekrarliliginda.
 
-**Ogrenilen:** Kalibrasyon icin ideal olan desen (yuksek kontrastli,
-tekrarli), stereo esleme icin **en kotu** durumdur. Ayni desen bir
-adimda yardimci, digerinde zararli.
+**Ogrenilen:** Kalibrasyon icin ideal olan desen — yuksek kontrastli,
+duzenli tekrarli — stereo esleme icin **en kotu** durumdur. Ayni
+nesne bir adimda vazgecilmez, digerinde zararli. Bir bileseni
+"iyi/kotu" diye degil, **hangi adimda ne yaptigina** gore
+degerlendirmek gerekiyor.
 
-*Gorseller:*
-`output/reports/tahta_derinlik_bozuk.png`,
+*Gorseller:* `output/reports/tahta_derinlik_bozuk.png`,
 `output/reports/duzlem_kim_hakli.png`
 
 ---
 
-### GUN H — Kare olcusunun bagimsiz dogrulanmasi
-*(2026-08-20)*
+### GUN 10 — Olcek dogrulamasi ve asil bulgu: geometrinin belirleyiciligi
 
-Tum mutlak olcumler `olculen_kare_boyutu_mm = 20.0` degerine
-dayaniyor. Bu deger yanlissa **tum olcumler ayni oranda kayar** ve
-bu hata sistem icinden fark edilemez.
+**Bolum 1 — Olcegin bagimsiz dogrulanmasi**
 
-**Dairesel olmayan kontrol:** Komsu ChArUco koselerinin **3B
-mesafesi** olculdu — config'deki degeri hic kullanmadan.
+Sistemdeki tum mutlak olcumler, kalibrasyon deseninin kare boyu
+degerine (20.0 mm) dayaniyor. Bu deger yanlissa **tum olcumler ayni
+oranda kayar** ve bu hata sistemin kendi icinden fark edilemez.
+
+Dairesel olmayan bir kontrol kuruldu: komsu desen koselerinin **3B
+uzayda birbirine uzakligi** olculdu — kayitli kare boyu degeri hic
+kullanilmadan.
 
 | | Deger |
 |---|---|
 | 20 cekimde medyan | **20.05 mm** |
 | Salinim | ±0.36 mm |
-| Config | 20.00 mm |
+| Kayitli deger | 20.00 mm |
 | Oran | **1.0023 (+%0.2)** |
 
-**Ogrenilen:** Bir sistemin kendi varsayimini kendi ciktisiyla
-dogrulamasi dairesel olur. Bagimsiz bir yol bulmak gerekir.
+**Ogrenilen:** Bir sistem kendi varsayimini kendi ciktisiyla
+dogrulayamaz. Bagimsiz bir yol bulunmali.
 
----
+**Bolum 2 — Gurultu darbogaz degil**
 
-### GUN I — Asil bulgu: sonucu belirleyen sey GEOMETRI
-*(2026-08-20)*
+Sistemin ne kadar hassas oldugu dogrudan olculdu: 46 adet duz masa
+yamasinda yerel sacilim **1.15 mm**. Bu deger, bagimsiz olculen
+epipolar hatayla (0.420 piksel) tutarli.
 
-Ayni kod, ayni ayarlar, farkli kamera yerlesimi. Referans cisim
-termos, gercek 250 x 72 mm:
+Ama gorulen olcum hatalari **30–60 mm** — sensor gurultusunun 30-50
+kati. Yani darbogaz sensor ya da kalibrasyon degil, **"hangi piksel
+cisme ait" karari**.
 
-| Bakis | Mesafe | tol 15 / 30 / 60 → UZUN | Yayilim |
+**Pratik sonuc:** Daha uzun baz ya da daha iyi kalibrasyon bu
+projede anlamli kazanc getirmez. Caba segmentasyona ve kamera
+yerlesimine harcanmali.
+
+**Bolum 3 — Asil bulgu: sonucu belirleyen sey GEOMETRI**
+
+Ayni kod, ayni ayarlar, yalnizca kamera yerlesimi farkli. Referans
+cisim 250 x 72 mm:
+
+| Bakis | Mesafe | Uc farkli ayarla sonuc | Yayilim |
 |---|---|---|---|
-| **YANDAN, cisim dik** | 610 mm | **252.3 / 252.2 / 252.2** | **0.1 mm** |
-| **YANDAN, cisim dik** | 609 mm | **256.8 / 256.8 / 256.8** | **0.0 mm** |
-| **YANDAN, cisim dik** | 625 mm | **254.5 / 255.2 / 255.2** | **0.7 mm** |
+| **Yandan, cisim dik** | 610 mm | **252.3 / 252.2 / 252.2** | **0.1 mm** |
+| **Yandan, cisim dik** | 609 mm | **256.8 / 256.8 / 256.8** | **0.0 mm** |
+| **Yandan, cisim dik** | 625 mm | **254.5 / 255.2 / 255.2** | **0.7 mm** |
 | Tepeden, yatik | 561 mm | 270.9 / 290.5 / 310.1 | 39.2 mm |
 | Tepeden, yatik | 718 mm | 177.8 / 204.7 / 264.6 | 86.8 mm |
 
-**Asil kazanc dogruluk degil TOLERANSA DUYARSIZLIK.** Iyi
-kurulumda sonuc parametre seciminden bagimsiz cikiyor; kotu
-kurulumda ayni cisim icin 177 mm de yazilabilir 264 mm de.
+**Asil kazanc dogruluk degil, PARAMETREYE DUYARSIZLIK.** Iyi
+yerlesimde sonuc ayar seciminden bagimsiz cikiyor. Kotu yerlesimde
+ayni cisim icin 177 mm de yazilabilir 264 mm de — yani tek bir sayi
+olarak raporlanamaz.
 
 **Kural (tek cumle):** Kamera cismin en buyuk yuzlerini gormeli.
-**Kameraya dogru bakan eksen olculemeyen eksendir.**
+**Kameraya dogru bakan eksen, olculemeyen eksendir.**
 
-**Neden:** Cisim bakis dogrultusunda uzaniyorsa, tabandan tepeye
-derinlik surekli degisir ve derinlik toleransi cismin ancak bir
-dilimini kapsar.
+**Teorik tahminle karsilastirma (Gun 2'ye donus):** Planlamada
+calisma bandi 350–550 mm hesaplanmisti. Gercek olcumlerde en iyi
+sonuclar **550–650 mm** bandinda alindi. Teori dogru yonu
+gostermis; sapma, planlamada varsayilan baz (60 mm) ile gercek
+bazin (71.79 mm) farkindan geliyor — daha uzun baz, kullanilabilir
+bandi bir miktar uzaga kaydiriyor.
 
-**Ikinci etken — mesafe:** Derinlik hassasiyeti mesafenin
-**karesiyle** kotulesir:
-
-| Z | 1 px derinlik hatasi |
-|---|---|
-| 400 mm | 1.57 mm |
-| 550 mm | 2.97 mm |
-| 718 mm | 5.06 mm |
-| 1000 mm | 9.82 mm |
-
-**Uygulamaya eklenen onlem:** "Kurulum kontrolu" butonu, sahnenin
-baskin duzlemini canli derinlikten bulup bakis acisini olcuyor.
-Olculdu: yandan 75-80 derece, tepeden 16-29 derece — arada 46
-derecelik bosluk. Bes gercek cekimde 5/5 dogru karar verdi.
+**Uygulamaya eklenen onlem:** "Kurulum kontrolu" islevi, sahnedeki
+baskin duzlemi canli derinlikten bulup bakis acisini olcuyor.
+Olculdu: yandan bakista 75–80 derece, tepeden 16–29 derece — arada
+46 derecelik bosluk. Bes gercek cekimde 5/5 dogru karar verdi. Boylece
+kullanici olcum almadan once kurulumun uygun olup olmadigini
+goruyor.
 
 *Gorsel:* `output/reports/rapor_dogrulama_levhasi.png`
-
----
-
-### GUN J — Gurultu darbogaz degil, segmentasyon darbogaz
-*(2026-08-20)*
-
-Sistemin ne kadar hassas oldugu dogrudan olculdu: 46 adet 120x120
-piksellik **duz masa yamasinda** yerel duzlemsel sacilim.
-
-| | Deger |
-|---|---|
-| Medyan sacilim | **1.15 mm** |
-| Disparity karsiligi | 0.44 px |
-| Bagimsiz olculen epipolar hata | 0.420 px |
-
-Iki bagimsiz olcum ayni sayiyi veriyor — sistem tutarli.
-
-**Ama gordugumuz olcum hatalari 30-60 mm**, yani sensor
-gurultusunun **30-50 kati**. Darbogaz sensor ya da kalibrasyon
-degil, **"hangi piksel cisme ait" karari**.
-
-**Bunun pratik sonucu:** Baz uzunlugunu buyutmek ya da daha iyi
-kalibrasyon yapmak bu projede **anlamli kazanc getirmez**. Cabayi
-segmentasyona ve kamera yerlesimine harcamak gerekir.
-
-Gurultunun yone gore dagilimi (oran = Z / B):
-
-| Z | Yanal | Derinlik | Oran |
-|---|---|---|---|
-| 400 mm | 0.28 mm | 1.57 mm | 5.6x |
-| 550 mm | 0.39 mm | 2.97 mm | 7.7x |
-| 1000 mm | 0.71 mm | 9.82 mm | 13.9x |
 
 ---
 
