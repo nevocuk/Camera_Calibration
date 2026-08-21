@@ -195,6 +195,14 @@ olcumlerinin tamami yandan bakisla, 550-650 mm'de alinmali.
 Derinlik hassasiyeti mesafenin karesiyle kotulesir: 560 mm'de
 3.09 mm/px, 718 mm'de 5.06 mm/px.
 
+### Kurulum kontrolu: bakis acisi derinlikten olculebiliyor (2026-08-20)
+Sahnenin baskin duzleminin normali ile optik eksen arasindaki aci
+bakisi tereddutsuz ayiriyor: **yandan 75-80 derece, tepeden 16-29
+derece**. Arada 46 derecelik bosluk; esik 55 derece. ChArUco
+gerekmez, canli derinlikten RANSAC yeter. Olcum tabindaki "Kurulum
+kontrolu" butonu bunu ve mesafeyi (onerilen 500-680 mm) denetliyor;
+bes gercek cekimde 5/5 dogru karar verdi.
+
 ### Deneysel kontroller varsayilan GIZLI (2026-08-20)
 `kenar`, `basamak`, `yukseklik`, `watershed` yalnizca kotu
 geometride ise yariyor; iyi kurulumda sonucu hic degistirmedikleri
