@@ -1,0 +1,10 @@
+# Stereo Olcum Kiti bagimliliklari
+#
+# DIKKAT: opencv-contrib-python SART. Duz opencv-python paketinde
+# ChArUco (cv2.aruco) ve WLS filtresi (cv2.ximgproc) YOK.
+# Ikisi birden kuruluysa once ikisini de kaldir:
+#     pip uninstall opencv-python opencv-contrib-python
+#     pip install opencv-contrib-python
+opencv-contrib-python>=4.7
+numpy>=1.20
+pillow>=9.0
