@@ -1,7 +1,35 @@
 # Teori Notları — Kalibrasyondan Ölçüme Matematiksel Zincir
 
+> ## ⚠ DİKKAT — BU DOSYADAKİ SAYILAR ESKİ
+>
+> Bu notlar **13 Ağustos** tarihli kalibrasyona göre yazıldı. O kalibrasyon
+> 1280×960 çözünürlükte ve AprilTag grid board ile yapılmıştı. Sistem o
+> tarihten sonra **2048×1536 çözünürlüğe ve ChArUco 9×13 desenine** geçti;
+> gövde ve kalibrasyon yenilendi.
+>
+> **Matematik ve sezgi anlatımları geçerlidir — yalnızca sayılar değişti.**
+> Rapora veya sözlü sınava sayı taşırken aşağıdaki güncel tabloyu kullan:
+>
+> | Parametre | Bu dosyada (ESKİ) | Güncel (GEÇERLİ) |
+> |---|---|---|
+> | Çözünürlük | 1280 × 960 | **2048 × 1536** |
+> | Kalibrasyon deseni | AprilTag grid board | **ChArUco 9×13, kare 20,0 mm** |
+> | Baz uzunluğu B | 71,65 mm | **71,79 mm** |
+> | Rektifiye odak f′ | 898,25 px | **1418,18 px** |
+> | Ham odak (K) | 809,56 px | **1288,28 px** |
+> | Stereo RMS | 0,636 px | **0,8340 px** |
+> | Epipolar hata | (ölçülmemişti) | **0,420 px** |
+> | f′ · B | 64.360 | **101.811** |
+> | nd = 128 → en yakın | 503 mm | **795 mm** |
+> | nd = 256 → en yakın | 251 mm | **398 mm** |
+>
+> Güncel değerlerin kaynağı: `output/reports/rapor_sistem.csv`
+> ve `docs/RAPOR_DEVIR_COWORK.md`. Rapora giren hâli:
+> `docs/Staj_Raporu.docx`.
+
 Bu dosya sözlü sınav hazırlığı ve rapor "Yöntem" bölümü için kaynak metindir.
-Tüm sayılar bu projenin kendi kalibrasyon sonuçlarındandır (`calibration/calib_result.npz`).
+Aşağıdaki türetimler ve sezgi anlatımları geçerlidir; sayılar için yukarıdaki
+güncel tabloya bak.
 
 ---
 
