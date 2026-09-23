@@ -249,12 +249,12 @@ zaten azaltir; daha buyuk blok ve daha yuksek lambda ile daha yumusak,
 temiz bir harita cikar. Canli modda bu pahali olurdu.
 
 **Neden `numDisparities=256`:** Arama araligi en yakin olculebilir
-mesafeyi belirler (f=1420.04 px, B=71.6 mm):
+mesafeyi belirler (f=P1[0,0]=1418.18 px, B=71.79 mm):
 
 | numDisparities | En yakin mesafe | Olu sol kenar |
 |---|---|---|
-| 128 | 794 mm | %6.3 |
-| **256** | **397 mm** | %12.5 |
+| 128 | 795 mm | %6.3 |
+| **256** | **398 mm** | %12.5 |
 | 384 | 265 mm | %18.8 |
 
 Soldaki `numDisparities` kadar piksel **yapisal olarak** gecersizdir

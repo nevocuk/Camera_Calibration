@@ -114,12 +114,12 @@ cv2.normalize ile parlaklik esleme denendi, tum piksel degerlerini mean±std ara
 ### numDisparities=256
 2048 piksel genislikte 256 disparity → sol kenardaki 256 piksel (%12.5) yapisal olarak gecersiz (esleme yapacak referans pikseli yok). Bu kabul edilebilir — merkezdeki cisimler icin sorun degil.
 
-**Mesafe siniri (olculdu, f=1420.04 px, B=71.6 mm):**
+**Mesafe siniri (gecerli kalibrasyon: f=P1[0,0]=1418.18 px, B=71.79 mm):**
 
 | numDisparities | En yakin olculebilir mesafe |
 |---|---|
-| 128 | 794 mm |
-| 256 | **397 mm** |
+| 128 | 795 mm |
+| 256 | **398 mm** |
 | 384 | 265 mm |
 
 Yani 256 ile 40 cm'den yakin cisim olculemez. Hesaplama tabindaki `Z_min` varsayilani 300 mm — bu deger **ulasilamaz**, 400 mm'nin altina inmek icin numDisparities 384'e cikarilmali (daha yavas + %18.75 olu kenar).
@@ -317,7 +317,7 @@ hafifce iyilestiriyor. `uniquenessRatio` da eski degerine (15) donduruldu;
 ## 6. BILINEN ACIK RISKLER / COZULMEMIS SORUNLAR
 
 ### Kalibrasyon RMS hedefin ustunde
-Mevcut (`calib_result.npz`'den okundu): **RMS 0.7407 px** (sol 0.5950, sag 0.6241). CLAUDE.md hedefi < 0.4 px; `calibration.py` cozunurlukle olcekli limit kullanir: `0.4 x (2048/960) = 0.853 px` — bu sinirin altinda, yani gecerli. Rapor icin ideal degil. Iyilestirme: daha fazla ve daha temiz kare, hareket bulanikligi olmadan.
+Mevcut (`calib_result.npz`'den okundu, 2026-08-18 kalibrasyonu): **RMS 0.8340 px** (sol 0.7703, sag 0.7682). CLAUDE.md hedefi < 0.4 px; `calibration.py` cozunurlukle olcekli limit kullanir: `0.4 x (2048/960) = 0.853 px` — bu sinirin altinda, yani gecerli. RMS'i dusurmek icin kare ATILMAMALI: olculdu, RMS duser ama epipolar hata kotulesir (bkz. ilerleme_gunlugu.md, 2026-08-18). Kalite olcutu epipolar hata (0.420 px) ve kadraj kapsamasidir; bu kalibrasyon o olcute gore onceki 0.7407 RMS'li setten daha iyidir.
 
 ### Yakin mesafede disparity kararsizligi (YENI — 2026-08-16)
 Kaydedilmis 10 gercek cekim iki farkli SGBM parametre setiyle yeniden islendi:
@@ -851,10 +851,10 @@ Bu projede iki ayri odak uzunlugu dolasiyor, ikisi de dogru ama farkli yerlerde 
 
 | Deger | Kaynak | Ne zaman kullanilir |
 |---|---|---|
-| **1291.8 px** | `K1[0,0]` — ham (rektifiye edilmemis) intrinsik | solvePnP, ham goruntu geometrisi. `olcum_defteri.csv`'de `fx_sol` olarak bu yazili. |
-| **1420.04 px** | `P1[0,0]` — rektifiye projeksiyon matrisi | **Mesafe/deltaZ hesabi.** Disparity rektifiye goruntude olculdugu icin dogru olan budur. |
+| **1288.28 px** | `K1[0,0]` — ham (rektifiye edilmemis) intrinsik | solvePnP, ham goruntu geometrisi. `olcum_defteri.csv`'de `fx_sol` olarak bu yazili. |
+| **1418.18 px** | `P1[0,0]` — rektifiye projeksiyon matrisi | **Mesafe/deltaZ hesabi.** Disparity rektifiye goruntude olculdugu icin dogru olan budur. |
 
-`Z = f * B / d` ve `deltaZ = Z² * delta_d / (f * B)` formullerinde **P1[0,0] = 1420** kullanilmali. Hesaplama tabi kalibrasyon yuklendiginde bu degeri otomatik doldurur; hardcoded varsayilan (1292) sadece kalibrasyon yuklenmemisken gorunur ve yaniltir.
+`Z = f * B / d` ve `deltaZ = Z² * delta_d / (f * B)` formullerinde **P1[0,0] = 1418.18** kullanilmali. Hesaplama tabi kalibrasyon yuklendiginde bu degeri otomatik doldurur; hardcoded varsayilan (1292) sadece kalibrasyon yuklenmemisken gorunur ve yaniltir.
 
 ### camera_test.py yapisi
 ```

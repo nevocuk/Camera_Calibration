@@ -17,7 +17,7 @@
 
 ## SABLON KURALLARI (Word'de uygulanacak)
 
-| Ogo | Bicim |
+| Oge | Bicim |
 |---|---|
 | Bolum basligi | 14 punto, **kalin**, BUYUK HARF, sirali numarali |
 | Alt bolum | 12 punto, **kalin**, sirali numarali |
@@ -51,7 +51,7 @@ calismada birincisinden daha ogretici oldu.
 
 Bir cismin fotografindan olcu cikarmanin onundeki temel engel,
 tek bir goruntude **olcek bilgisinin bulunmamasidir**. Ayni cisim
-kameraya yaklastikca buyur, uzaklastikca kucultur; goruntuye
+kameraya yaklastikca buyur, uzaklastikca kuculur; goruntuye
 bakarak hangisinin gecerli oldugu anlasilmaz.
 
 Stereo goru bu sorunu iki kamerayi bilinen bir mesafeye
@@ -110,7 +110,7 @@ buyumesidir. Sistemi iki kat uzaga kurmak hatayi iki degil **dort
 kat** artirir.
 
 Cizelge 2'de planlama asamasinda kullanilan kestirim degerleriyle
-(f ≈ 914 piksel, B = 60 mm) hesaplanan calisma arali
+(f ≈ 914 piksel, B = 60 mm) hesaplanan calisma araligi
 gosterilmektedir.
 
 **[CIZELGE 2 BURAYA]**
@@ -143,7 +143,7 @@ Kalibrasyondan sonra bu konumun degismemesi zorunludur; degisirse
 tum kalibrasyon gecersiz olur.
 
 Iki kamerayi ayni anda yonetmek icin bir test araci yazdim. Bu
-araclarin en kritik islevi, kareleri **es zamanli** almaktir.
+aracin en kritik islevi, kareleri **es zamanli** almaktir.
 Kameralari sirayla okumak, aralarina goruntu cozme suresi koyar; bu
 surede cisim veya kamera hareket ederse disparity degeri kayar.
 Bunu onlemek icin once iki kameraya da "kareyi yakala", ardindan
@@ -202,7 +202,7 @@ Cizelge 4'te verilmektedir.
 
 Altyazi: **Cizelge 4 Tum ayarlar esitlendikten sonra olculen parlaklik**
 
-Iki buçuk kati askin farkin tamami ayar kaynakliymis; donanimsal bir
+Iki bucuk kati askin farkin tamami ayar kaynakliymis; donanimsal bir
 sorun yokmus.
 
 Bu arastirma sirasinda ikinci bir bulgu daha ortaya cikti: kullanilan
@@ -317,7 +317,7 @@ Altyazi: **Cizelge 7 Yapi yonune gore eslesme orani**
 **Yansima zararli, golge zararsiz.** Golgeli bolgelerden kacinmak
 gerektigini dusunuyordum. Sol-sag tutarlilik kontrolu bunun tersini
 gosterdi: golgeli bolgelerde tutarsizlik %27,1 iken parlama olan
-bolgelerde %58,7 olcüldü. Golge yuzeye yapisiktir; iki kamera onu
+bolgelerde %58,7 olculdu. Golge yuzeye yapisiktir; iki kamera onu
 ayni fiziksel noktada gorur ve gecerli bir doku olusturur. Yansima
 ise bakis acisina baglidir; parlak leke iki goruntude farkli
 fiziksel noktada durdugu icin algoritma lekeyi lekeye eslestirip
@@ -389,7 +389,7 @@ Bu bolum, calismanin yontem acisindan en onemli asamasini anlatir.
 Birden fazla aday bolgeyi deneyip sonuclari test cisminin bilinen
 olculerine yakinliga gore puanladim ve en iyi puanli sonucu
 (234 × 55 × 39 mm) "cisim olculdu" diye kaydettim. Sonradan
-gorulduki **olculen sey masanin kenariydi**; tesadufen benzer
+goruldu ki **olculen sey masanin kenariydi**; tesadufen benzer
 sayilar uretmisti.
 
 Bu olay bir hatanin duzeltilmesinden ibaret degil, dogrulama
@@ -401,7 +401,7 @@ Bunun uzerine her olcum icin hesaplanan uc boyutlu kutuyu goruntu
 uzerine cizdiren bir dogrulama araci yazdim. Kutu cismi sariyorsa
 olcum dogru, cevreye tasiyorsa bolge kacmis demektir. Her boyutun
 kenarlari ve kosedeki sayisal degeri ayni renkte cizilir; boylece
-hangi sayinin hangi kenara ait oldugu tereddutsuz goruluru. Sekil
+hangi sayinin hangi kenara ait oldugu tereddutsuz gorulur. Sekil
 4'te bes olcumun dogrulama gorseli bir arada sunulmaktadir.
 
 **[SEKIL 4 BURAYA]**
@@ -480,7 +480,8 @@ gercek cekimde bes dogru karar vermistir.
 ## 4.10. Sonuclar
 
 Gelistirilen sistem, uygun kurulum kosullarinda bir cismin en uzun
-kenarini yuzde bir ile yuzde uc arasinda bir hatayla olcebilmektedir.
+kenarini yaklasik yuzde bir ile yuzde uc arasinda bir hatayla
+olcebilmektedir.
 Cizelge 11'de referans cisim uzerinde alinan olcumler ozetlenmistir.
 
 **[CIZELGE 11 BURAYA]**
@@ -514,7 +515,7 @@ tahtanin uzerinde blok eslemenin yanlis kareye kilitlenmesine yol
 aciyor. Bu durumda duzlem konumu 30–57 mm sapabilmektedir. Sorun
 tanimlanmis ancak cozulememistir. Sekil 5'te tahtanin uzerindeki
 bozuk derinlik olcumu gorulmektedir; duz bir tahtanin mesafesi
-410–656 mm araliginda saçilmaktadir.
+410–656 mm araliginda sacilmaktadir.
 
 **[SEKIL 5 BURAYA]**
 Dosya: `output/reports/tahta_derinlik_bozuk.png`
@@ -573,7 +574,7 @@ gerekmez.
 | `output/reports/sekil2_teorik_hata_egrisi.png` | Bolum 4.2, Cizelge 2'nin yanina |
 | `output/reports/duzlem_kim_hakli.png` | Bolum 4.10, zemin duzlemi anlatimina |
 | `output/reports/bolge_nerede_duruyor.png` | Bolum 4.7 |
-| Uygulama arayuzu ekran goruntusu | Bolum 4.3 — **bu goruntuyu ogrencinin alması gerekiyor** |
+| Uygulama arayuzu ekran goruntusu | Bolum 4.3 — **bu goruntuyu ogrencinin almasi gerekiyor** |
 
 ---
 
