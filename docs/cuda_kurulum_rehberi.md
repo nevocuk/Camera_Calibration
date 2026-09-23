@@ -72,7 +72,7 @@ pip install Pillow
 ### 7. OpenCV Kaynak Kodlarini Indir
 Anaconda Prompt veya PowerShell'de:
 ```
-cd C:\Users\nvflb
+cd %USERPROFILE%
 mkdir opencv_build
 cd opencv_build
 git clone https://github.com/opencv/opencv.git --branch 4.10.0 --depth 1
@@ -86,7 +86,7 @@ Iki repo: ~500 MB
 
 ### 8. Build Klasoru Olustur
 ```
-cd C:\Users\nvflb\opencv_build
+cd %USERPROFILE%\opencv_build
 mkdir build
 cd build
 ```
@@ -99,8 +99,8 @@ conda activate stereo
 
 cmake -G "Visual Studio 17 2022" -A x64 ^
   -D CMAKE_BUILD_TYPE=Release ^
-  -D CMAKE_INSTALL_PREFIX=C:/Users/nvflb/opencv_build/install ^
-  -D OPENCV_EXTRA_MODULES_PATH=C:/Users/nvflb/opencv_build/opencv_contrib/modules ^
+  -D CMAKE_INSTALL_PREFIX=%USERPROFILE%/opencv_build/install ^
+  -D OPENCV_EXTRA_MODULES_PATH=%USERPROFILE%/opencv_build/opencv_contrib/modules ^
   -D WITH_CUDA=ON ^
   -D CUDA_ARCH_BIN=8.6 ^
   -D CUDA_ARCH_PTX=8.6 ^
@@ -144,12 +144,12 @@ cmake --build . --config Release --target install -j 8
 ### 11. Python'a Baglama
 Derleme bitince:
 ```
-cd C:\Users\nvflb\opencv_build\install\python
+cd %USERPROFILE%\opencv_build\install\python
 pip install .
 ```
 Veya elle kopyala:
 ```
-copy C:\Users\nvflb\opencv_build\install\python\cv2\*.pyd %CONDA_PREFIX%\Lib\site-packages\
+copy %USERPROFILE%\opencv_build\install\python\cv2\*.pyd %CONDA_PREFIX%\Lib\site-packages\
 ```
 
 ### 12. Test
