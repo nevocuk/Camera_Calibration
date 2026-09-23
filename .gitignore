@@ -54,3 +54,9 @@ staj_bilgilendirme_sunumu_*.pdf
 # Conda / CUDA build (proje disinda ama yine de)
 opencv_build/
 miniconda*/
+
+# Makineye ozel Claude Code ayarlari
+.claude/settings.local.json
+
+# Baskasina ait / kisisel belgeler deponun disinda kalir
+docs/ornek_staj_raporu.pdf
