@@ -11,7 +11,7 @@ import os
 import sys
 import tkinter as tk
 
-PROJ = r"C:\Users\nvflb\OneDrive\Desktop\camera proje"
+PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PROJ, "src"))
 import camera_test as ct  # noqa: E402
 
