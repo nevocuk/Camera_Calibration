@@ -1,7 +1,7 @@
 # Stereo Kamera Projesi — Ilerleme Gunlugu
 
 ## Proje Ozeti
-Nevfel, ATU Bilgisayar Muhendisligi, Sadektech staji.
+ATU Bilgisayar Muhendisligi, zorunlu yaz staji.
 Stereo kamera ile boyutsal olcum ve kutu onerme sistemi.
 
 ---
@@ -368,7 +368,7 @@ ve **dolgulu** (WLS sonrasi). Onceki "%99.9" degeri dolgudan geliyordu
 ve kalite gostergesi degildi.
 
 ### Rapor taslagi olusturuldu
-`docs/STAJ_RAPORU_TASLAK.md` — Ek-4'e aktarilmak uzere. Olculmus veriler
+Rapor taslagi (depo disinda tutuluyor) — Ek-4'e aktarilmak uzere. Olculmus veriler
 `[OLCULDU]`, bekleyen bolumler `[BEKLIYOR]` etiketli; her bekleyen bolumun
 altinda olcum protokolu yazili.
 

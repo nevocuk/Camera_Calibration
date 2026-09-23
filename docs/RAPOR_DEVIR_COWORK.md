@@ -13,7 +13,7 @@
 ## 0. GOREV TANIMI
 
 **Rapor:** ATU Bilgisayar Muhendisligi zorunlu staj raporu (Ek-4).
-**Ogrenci:** Nevfel — bu **ikinci** staj projesi.
+**Kapsam:** Bu **ikinci** staj projesi.
 **Kapsam:** Rapor iki projeyi kapsayacak; bu dosya **yalnizca stereo
 kamera projesini** anlatiyor. Diger proje ayrica yazilacak.
 **Hedef uzunluk:** Bu proje icin ~8 sayfa govde (ornek raporda tum
@@ -225,7 +225,7 @@ tavana yapisip **doku kayboluyor**; esleme algoritmasi tutunacak
 yapi bulamiyor. "Aydinlik goruntu iyi goruntudur" varsayimi stereo
 icin gecerli degil.
 
-*Gorsel onerisi:* uygulama arayuzu ekran goruntusu (Nevfel alacak)
+*Gorsel onerisi:* uygulama arayuzu ekran goruntusu (ogrenci alacak)
 
 ---
 
@@ -658,7 +658,7 @@ gostermekten degerlidir.
 | `output/depth_captures/*_overlay.png` | Ornek derinlik ciktisi (290 adet arasindan secilir) |
 | `output/depth_captures/*_kutu_*.png` | Tekil kutu gorselleri (56 adet) |
 
-**Ekran goruntusu gereken (Nevfel alacak):** uygulamanin arayuzu —
+**Ekran goruntusu gereken (ogrenci alacak):** uygulamanin arayuzu —
 Olcum ve Derinlik sekmeleri.
 
 ---

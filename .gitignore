@@ -60,3 +60,7 @@ miniconda*/
 
 # Baskasina ait / kisisel belgeler deponun disinda kalir
 docs/ornek_staj_raporu.pdf
+
+# Kisisel taslak raporlar depoya girmez
+docs/Staj_Raporu_Taslak.docx
+docs/STAJ_RAPORU_TASLAK.md

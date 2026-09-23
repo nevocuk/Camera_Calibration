@@ -11,7 +11,7 @@
 
 ## 1. PROJE AMACI
 
-Iki USB kamera (OV5693 sensor, M12 lens, 3B basilmis govde) ile stereo derinlik haritasi olusturup, masanin uzerindeki bir cismin 3B boyutlarini olcmek ve uygun kargo kutusunu onermek. Proje Nevfel'in ATU Bilgisayar Muhendisligi bolumundeki Sadektech staj calismasi icin hazirlanıyor; cikti olarak staj raporu (Ek-4 sablonu), canli demo ve dogrulama tablolari uretilecek.
+Iki USB kamera (OV5693 sensor, M12 lens, 3B basilmis govde) ile stereo derinlik haritasi olusturup, masanin uzerindeki bir cismin 3B boyutlarini olcmek ve uygun kargo kutusunu onermek. Proje ATU Bilgisayar Muhendisligi bolumunde yurutulen staj calismasi icin hazirlanıyor; cikti olarak staj raporu (Ek-4 sablonu), canli demo ve dogrulama tablolari uretilecek.
 
 Nihai hedef: bilinen mesafelerde %5'in altinda olcum hatasi, tekrarlanabilirlik, ve fiziksel kutu kesimi ile dogrulama.
 

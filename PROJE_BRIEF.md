@@ -16,7 +16,7 @@
 
 ## 0. BAĞLAM
 
-Nevfel, ATÜ Bilgisayar Mühendisliği. Sadektech'te zorunlu yaz stajı.
+ATÜ Bilgisayar Mühendisliği. zorunlu yaz stajı.
 Şirket kodu ve verisi gizlilik anlaşması kapsamında — staj raporunda şirketin gerçek
 pipeline'ından bahsedilemez. Bunun yerine aynı teknik yetkinliği gösteren, kendi
 donanım ve veriyle kurulan bağımsız bir prototip geliştiriliyor.
@@ -71,7 +71,7 @@ Rapor bu maddelere göre okunacak:
 ### ⚠️ Tek risk ve çözümü
 
 Hoca "**staj yerinin ihtiyacına yönelik** çözüm" diyor. Kargo/kutu senaryosu
-Sadektech'in işiyle doğrudan ilgili olmayabilir. Sözlü sınavda "şirketin bu işi mi var?"
+stajın yürütüldüğü kurumun işiyle doğrudan ilgili olmayabilir. Sözlü sınavda "şirketin bu işi mi var?"
 sorusu gelebilir.
 
 **Çerçeveyi böyle kur — senaryoyu "şirket ihtiyacı" değil "doğrulama aracı" olarak sun:**
