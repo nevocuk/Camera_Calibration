@@ -64,3 +64,6 @@ docs/ornek_staj_raporu.pdf
 # Kisisel taslak raporlar depoya girmez
 docs/Staj_Raporu_Taslak.docx
 docs/STAJ_RAPORU_TASLAK.md
+
+# Uretilen rapor ciktisi (kaynak: docs/rapor_metni_stereo.md)
+output/reports/rapor_stereo_bolumu.docx
