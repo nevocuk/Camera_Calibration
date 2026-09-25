@@ -26,6 +26,7 @@ Kullanim:
 import argparse
 import csv
 import datetime
+import math
 import os
 import sys
 
@@ -82,25 +83,48 @@ def olc(dsp, pts, gl, sx, sy, tol_mm, gri_tol, sinir, f, B):
             "Z": Z0, "px": int(m.sum())}, None
 
 
-def levha_uret(gorseller, olcumler, cikti):
+# Rapordaki Cizelge 12 / Sekil 14 bu bes olcumu gosteriyor: ucu uygun
+# yerlesimde (yandan), ikisi uygun olmayan yerlesimde (tepeden).
+# Sekil altyazisi "ust uc serit sariyor, alt iki serit sarmiyor"
+# dedigi icin levhadaki sira da budur. Ayni cekimde birden fazla
+# olcum oldugu icin cekim adi yetmez - gorsel dosyasi tiklanan
+# noktayi da tasidigindan secim onun uzerinden yapilir.
+RAPOR_LEVHA = ["q_20260819_170641_kutu_1373_1045.png",
+               "q_20260819_172145_kutu_1539_1129.png",
+               "q_20260819_172354_kutu_1412_1060.png",
+               "q_20260820_093039_kutu_897_579.png",
+               "q_20260820_141234_kutu_1076_674.png"]
+
+
+def levha_uret(gorseller, olcumler, cikti, secilenler=None):
     """Dogrulama gorsellerini TEK LEVHADA birlestir.
 
     Rapora tek resim girmesi icin. Her seridin ustunde bakis, mesafe
     ve hata yuzdesi yazar; hata %5'in altindaysa yesil, ustundeyse
     kirmizi. Sag taraftaki nokta bulutu panelleri kirpilir - levhada
     onemli olan kutunun cismi sarip sarmadigi.
+
+    `gorseller` ve `olcumler` ayni sirada uretildigi icin eslestirme
+    SIRAYA gore yapilir; cekim adina gore degil - ayni cekimde birkac
+    olcum olabiliyor ve o zaman seridin uzerine baska bir olcumun
+    sayilari yazilirdi.
+
+    `secilenler` verilirse yalnizca o gorsel dosyalari levhaya girer,
+    sira da o listeye gore olur.
     """
-    olc_map = {o["cekim"]: o for o in olcumler}
+    ciftler = list(zip(gorseller, olcumler))
+    if secilenler:
+        sozluk = {ad: cift for cift in ciftler for ad in (cift[0][1],)}
+        ciftler = [sozluk[ad] for ad in secilenler if ad in sozluk]
     kareler = []
-    for cekim, ad in gorseller:
+    for (cekim, ad), o in ciftler:
+        if not ad:
+            continue
         yol = os.path.join(CAP_DIR, ad)
         im = cv2.imread(yol)
         if im is None:
             continue
         im = im[:, :int(im.shape[1] * 0.63)]     # nokta bulutu panelini at
-        o = olc_map.get(cekim)
-        if o is None:
-            continue
         h = 300
         im = cv2.resize(im, (int(im.shape[1] * h / im.shape[0]), h))
         bant = np.zeros((52, im.shape[1], 3), np.uint8)
@@ -109,21 +133,44 @@ def levha_uret(gorseller, olcumler, cikti):
         cv2.putText(bant, f"{o['bakis']}  {o['mesafe_mm']:.0f} mm",
                     (8, 20), cv2.FONT_HERSHEY_SIMPLEX, .52,
                     (220, 220, 220), 1)
+        # serit genisligi 346 px; 0,52 punto ile bu satir tasip
+        # "gercek 250" yazisinin sonunu kirpiyordu
         cv2.putText(bant, f"UZUN {o['olculen_uzun_mm']:.1f} mm "
-                          f"({hata:+.1f}%)   gercek "
+                          f"({hata:+.1f}%)  gercek "
                           f"{o['gercek_uzun_mm']:.0f}",
-                    (8, 42), cv2.FONT_HERSHEY_SIMPLEX, .52, renk, 1)
+                    (8, 42), cv2.FONT_HERSHEY_SIMPLEX, .44, renk, 1)
         kareler.append(np.vstack([bant, im]))
     if not kareler:
         return None
     w = max(k.shape[1] for k in kareler)
-    kareler = [cv2.copyMakeBorder(k, 0, 0, 0, w - k.shape[1],
+    h = max(k.shape[0] for k in kareler)
+    kareler = [cv2.copyMakeBorder(k, 0, h - k.shape[0], 0, w - k.shape[1],
                                   cv2.BORDER_CONSTANT, value=(0, 0, 0))
                for k in kareler]
-    ust = np.zeros((46, w, 3), np.uint8)
+
+    # Seritleri tek sutuna dizince levha bir Word sayfasina sigmayacak
+    # kadar uzun cikiyor (olculdu: tek sutunda 15 cm genislikte 74 cm
+    # yukseklik). Sayfanin metin alani 16,1 x 22,9 cm; altyaziya da yer
+    # kalmasi icin en fazla 20 cm yukseklik hedeflenirse levhanin
+    # en-boy orani 16,1/20 = 0,80'den kucuk olmamali. Bu sarti saglayan
+    # EN AZ sutun sayisi secilir - fazla sutun seritleri gereksiz
+    # kucultur.
+    ENAZ_ORAN = 0.80
+    sutun = next((s for s in range(1, len(kareler) + 1)
+                  if (s * w) / (math.ceil(len(kareler) / s) * h) >= ENAZ_ORAN),
+                 len(kareler))
+    satirlar = []
+    for i in range(0, len(kareler), sutun):
+        grup = kareler[i:i + sutun]
+        while len(grup) < sutun:
+            grup.append(np.zeros_like(kareler[0]))
+        satirlar.append(np.hstack(grup))
+
+    genis = satirlar[0].shape[1]
+    ust = np.zeros((46, genis, 3), np.uint8)
     cv2.putText(ust, "Dogrulama: kutu cismi sariyorsa olcum dogru",
                 (10, 31), cv2.FONT_HERSHEY_SIMPLEX, .72, (255, 255, 255), 2)
-    cv2.imwrite(cikti, np.vstack([ust] + kareler))
+    cv2.imwrite(cikti, np.vstack([ust] + satirlar))
     return cikti
 
 
@@ -159,6 +206,10 @@ def main():
     with open(GIRDI, encoding="utf-8") as fh:
         satirlar = list(csv.DictReader(fh))
 
+    # gorseller olcumlerle BIREBIR ayni sirada uretilmeli - levhada her
+    # seridin uzerine kendi olcumunun sayilari yaziliyor. Bu liste
+    # olculebilen satirlari sirasiyla tutar.
+    olculenler = []
     olcumler, duyarlilik, elenen = [], [], []
     for r in satirlar:
         # dahil sutunu yoksa varsayilan E (geriye uyumluluk)
@@ -196,6 +247,7 @@ def main():
             "hata_orta_yuzde": round(yuzde(s["orta"], g_or), 1),
             "olculen_kisa_mm": round(s["kisa"], 1),
             "bolge_px": s["px"], "not": r.get("not", "")})
+        olculenler.append(r)
 
         # tolerans duyarliligi: ayni cekim, uc farkli tol
         sonuc = {}
@@ -226,9 +278,7 @@ def main():
     if a.gorsel:
         import subprocess
         print("Dogrulama gorselleri uretiliyor...")
-        for r in satirlar:
-            if not os.path.exists(os.path.join(CAP_DIR, r["cekim"])):
-                continue
+        for r in olculenler:
             k = subprocess.run(
                 [sys.executable, os.path.join(SCRIPT_DIR, "kutu_gorsel.py"),
                  "--dosya", r["cekim"],
@@ -240,11 +290,8 @@ def main():
             for satir in (k.stdout or "").splitlines():
                 if "Gorsel:" in satir:
                     ad = satir.split("Gorsel:")[1].strip()
-            if ad:
-                gorseller.append((r["cekim"], ad))
-                print(f"   {ad}")
-            else:
-                print(f"   URETILEMEDI: {r['cekim']}")
+            gorseller.append((r["cekim"], ad))
+            print(f"   {ad}" if ad else f"   URETILEMEDI: {r['cekim']}")
 
     p1 = csv_yaz("rapor_olcumler.csv", olcumler)
     csv_yaz("rapor_elenenler.csv", elenen)
@@ -359,11 +406,19 @@ def main():
 
     if gorseller:
         lv = levha_uret(gorseller, olcumler,
-                        os.path.join(OUT_DIR, "rapor_dogrulama_levhasi.png"))
+                        os.path.join(OUT_DIR, "rapor_dogrulama_levhasi.png"),
+                        secilenler=RAPOR_LEVHA)
         if lv:
+            md += ["\nRapordaki Sekil 14 levhasi (Cizelge 12'deki bes "
+                   "olcum): `rapor_dogrulama_levhasi.png`\n"]
+            print(f"   rapor_dogrulama_levhasi.png (rapor levhasi, "
+                  f"{len(RAPOR_LEVHA)} serit)")
+        tum = levha_uret(gorseller, olcumler,
+                         os.path.join(OUT_DIR, "rapor_dogrulama_tum.png"))
+        if tum:
             md += ["\nTum dogrulama gorselleri tek levhada: "
-                   "`rapor_dogrulama_levhasi.png`\n"]
-            print(f"   rapor_dogrulama_levhasi.png (birlesik levha)")
+                   "`rapor_dogrulama_tum.png`\n"]
+            print(f"   rapor_dogrulama_tum.png (tum olcumler)")
 
     p4 = os.path.join(OUT_DIR, "rapor_tablolari.md")
     with open(p4, "w", encoding="utf-8") as fh:
