@@ -1277,3 +1277,26 @@ gostermekten degerlidir.
 - Kalibrasyon lens geometrisine bagli, aydinlatma ayarlarina degil
 - Olcum defteri (`data/olcum_defteri.csv`) her olcumde guncellenecek
 - Desen olcusu: yazicidan cikan deseni kumpasla olc, OLCULEN degeri koda gir
+
+---
+
+## 2026-09-29 — Epipolar hata tum set uzerinde yeniden olculdu
+
+Raporda ve PROJE_KONTEXT'te **0.420 px** yaziyordu; bu deger hicbir
+kayittan yeniden uretilemedi. `src/epipolar_dogrula.py` yazilip
+kalibrasyon setinin tamami uzerinde olculdu:
+
+| | Deger |
+|---|---|
+| Kullanilan | 44 cift, 2994 kose (0 atlandi) |
+| Ortalama | **0.407 px** |
+| Medyan | 0.316 px |
+| %95'lik dilim | 1.142 px |
+| 1 px ustu kose | %7.3 |
+
+`calibration.py` ekrana bastigi epipolar degeri yalnizca **ilk bes
+cift** uzerinden hesapliyor (`used_pairs[:5]`) - 18 Agustos'ta kayda
+gecen 0.389 px bu yuzden. Rapordaki sayi artik 0.407.
+
+**Not:** bu tarihten onceki gunluk kayitlarinda gecen 0.420 ve 0.389
+degerleri tarihsel kayit olarak duruyor, degistirilmedi.

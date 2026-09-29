@@ -405,7 +405,7 @@ tam olarak aciklıyor. Egik duzlem kaydirmakla duzelmez.
 
 ### Gurultu darbogaz DEGIL - segmentasyon darbogaz (2026-08-20)
 46 adet 120x120 masa yamasinda yerel duzlemsel sacilim **1.15 mm**
-(0.44 px disparity gurultusu; olculen epipolar hata 0.420 px ile
+(0.44 px disparity gurultusu; olculen epipolar hata 0.407 px ile
 tutarli). Gordugumuz olcum hatalari 30-60 mm, yani sensor
 gurultusunun 30-50 kati.
 
@@ -771,7 +771,7 @@ Kalibrasyon oda sicakliginda yapilir. Ciddi sicaklik degisimi (15°C+) lens ve g
 - [x] Arayuz: kaydirilabilir tablar, katlanabilir bolumler, zoom + tiklama
 
 ### Kalibrasyon sinirlayici etken DEGIL (2026-08-19 olculdu)
-44 cift / 3264 kose uzerinde epipolar hata **0.420 px**. RMS tabani
+44 cift / 2994 kose uzerinde epipolar hata **0.407 px** (`src/epipolar_dogrula.py`). RMS tabani
 ~0.44 px ve bu **kose lokalizasyon gurultusu** — kare atarak RMS
 dusuruluyor ama epipolar hata **kotulesiyor**. Distorsiyon modelini
 buyutmek de fayda vermedi. Mevcut olcum hatalarinin kaynagi

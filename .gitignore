@@ -67,3 +67,6 @@ docs/STAJ_RAPORU_TASLAK.md
 
 # Uretilen rapor ciktisi (kaynak: docs/rapor_metni_stereo.md)
 output/reports/rapor_stereo_bolumu.docx
+
+# Kurum bilgisi bu bilgisayarda kalir, depo public
+data/kurum.local.json
