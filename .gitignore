@@ -65,8 +65,21 @@ docs/ornek_staj_raporu.pdf
 docs/Staj_Raporu_Taslak.docx
 docs/STAJ_RAPORU_TASLAK.md
 
-# Uretilen rapor ciktisi (kaynak: docs/rapor_metni_stereo.md)
+# Uretilen rapor ciktisi
 output/reports/rapor_stereo_bolumu.docx
 
 # Kurum bilgisi bu bilgisayarda kalir, depo public
 data/kurum.local.json
+
+# Kisisel notlar, rapor taslaklari ve arac talimatlari (yerelde kalir)
+CLAUDE.md
+PROJE_BRIEF.md
+docs/arsiv/
+docs/RAPOR_DEVIR_COWORK.md
+docs/rapor_*_stereo.md
+docs/rapor_metni_stereo.md
+docs/sozlu_sinav_notlari.md
+src/rapor_birlestir.py
+src/rapor_docx.py
+src/sozlu_notlari.py
+data/kurum.local.ornek.json

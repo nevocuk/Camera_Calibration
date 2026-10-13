@@ -11,7 +11,7 @@
 
 ## 1. PROJE AMACI
 
-Iki USB kamera (OV5693 sensor, M12 lens, 3B basilmis govde) ile stereo derinlik haritasi olusturup, masanin uzerindeki bir cismin 3B boyutlarini olcmek ve uygun kargo kutusunu onermek. Proje ATU Bilgisayar Muhendisligi bolumunde yurutulen staj calismasi icin hazirlanıyor; cikti olarak staj raporu (Ek-4 sablonu), canli demo ve dogrulama tablolari uretilecek.
+Iki USB kamera (OV5693 sensor, M12 lens, 3B basilmis govde) ile stereo derinlik haritasi olusturup, masanin uzerindeki bir cismin 3B boyutlarini olcmek ve uygun kargo kutusunu onermek. Proje ATU Bilgisayar Muhendisligi yaz staji sirasinda gelistirildi; ciktilar canli demo ve dogrulama tablolaridir.
 
 Nihai hedef: bilinen mesafelerde %5'in altinda olcum hatasi, tekrarlanabilirlik, ve fiziksel kutu kesimi ile dogrulama.
 
@@ -317,7 +317,7 @@ hafifce iyilestiriyor. `uniquenessRatio` da eski degerine (15) donduruldu;
 ## 6. BILINEN ACIK RISKLER / COZULMEMIS SORUNLAR
 
 ### Kalibrasyon RMS hedefin ustunde
-Mevcut (`calib_result.npz`'den okundu): **RMS 0.7407 px** (sol 0.5950, sag 0.6241). CLAUDE.md hedefi < 0.4 px; `calibration.py` cozunurlukle olcekli limit kullanir: `0.4 x (2048/960) = 0.853 px` — bu sinirin altinda, yani gecerli. Rapor icin ideal degil. Iyilestirme: daha fazla ve daha temiz kare, hareket bulanikligi olmadan.
+Mevcut (`calib_result.npz`'den okundu): **RMS 0.7407 px** (sol 0.5950, sag 0.6241). Ilk hedef < 0.4 px idi; `calibration.py` cozunurlukle olcekli limit kullanir: `0.4 x (2048/960) = 0.853 px` — bu sinirin altinda, yani gecerli. Rapor icin ideal degil. Iyilestirme: daha fazla ve daha temiz kare, hareket bulanikligi olmadan.
 
 ### Yakin mesafede disparity kararsizligi (YENI — 2026-08-16)
 Kaydedilmis 10 gercek cekim iki farkli SGBM parametre setiyle yeniden islendi:

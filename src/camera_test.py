@@ -2205,9 +2205,7 @@ class CameraApp:
 
             ("ADIM 8: Kalibre et", GREEN,
              "Kareler toplandiktan sonra\n"
-             "calibration.py scriptini calistir.\n"
-             "(Henuz yazilmadi - bu adimda\n"
-             "Claude Code'a sor.)\n\n"
+             "calibration.py scriptini calistir.\n\n"
              "Hedef: RMS < 0.4 px\n"
              "Cikti: calibration/calib_result.npz"),
 

@@ -82,7 +82,7 @@ Iki repo: ~500 MB
 
 ---
 
-## STAJDA YAPILACAKLAR (derleme)
+## YAPILACAKLAR (derleme)
 
 ### 8. Build Klasoru Olustur
 ```

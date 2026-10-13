@@ -23,11 +23,9 @@
 > | nd = 128 → en yakın | 503 mm | **795 mm** |
 > | nd = 256 → en yakın | 251 mm | **398 mm** |
 >
-> Güncel değerlerin kaynağı: `output/reports/rapor_sistem.csv`
-> ve `docs/RAPOR_DEVIR_COWORK.md`. Rapora giren hâli:
-> `docs/Staj_Raporu.docx`.
+> Güncel değerlerin kaynağı: `output/reports/rapor_sistem.csv`.
 
-Bu dosya sözlü sınav hazırlığı ve rapor "Yöntem" bölümü için kaynak metindir.
+Bu dosya, yöntemin teorik arka planını özetler.
 Aşağıdaki türetimler ve sezgi anlatımları geçerlidir; sayılar için yukarıdaki
 güncel tabloya bak.
 
